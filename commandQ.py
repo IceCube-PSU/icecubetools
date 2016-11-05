@@ -2,10 +2,12 @@
 
 
 from argparse import ArgumentParser
+from collections import Sequence
 import fcntl
 import os
 import random
 import subprocess
+import time
 
 
 QUEUE_FPATH = os.path.expandvars(os.path.expanduser('~/command.queue'))
@@ -30,11 +32,15 @@ def get_command(timeout):
                 commands = queue.readlines()
                 this_command = commands.pop().strip()
             if len(commands) == 0:
-                os.path.unlink(QUEUE_FPATH)
+                os.remove(QUEUE_FPATH)
             else:
                 with open(QUEUE_FPATH, 'w') as queue:
                     queue.writelines(commands)
             return this_command
+
+        except IOError, err:
+            if err.errno == 2:
+                return None
 
         finally:
             lockf.close()
@@ -72,7 +78,7 @@ def run_command(command, cpu_threads=1, cpu_cores=None, gpus=None):
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument(
-        '--gpu', type=str, required=True,
+        '-g', '--gpu', type=str, required=True,
         help='''Which gpu(s) to employ for all commands launched from this
         process'''
     )
@@ -85,20 +91,28 @@ def parse_args():
 
 
 def main():
+    queue_start_time = time.time()
     args = parse_args()
 
     while True:
         print '='*80
         print 'Getting a new command...'
         command = get_command(args.timeout)
+        if command is None:
+            break
         print 'Command to be run:\n    ' + command
-        print '='*80
+        print '>'*80
         t0 = time.time()
         ret = run_command(command=command, gpus=args.gpu)
         t1 = time.time()
-        print '='*80
+        print '<'*80
         print 'Command run time = %s sec' %(t1-t0)
         print '\n\n'
+
+    run_time = time.time() - queue_start_time
+    print '\nQueue exhausted (file %s no longer exists).' %QUEUE_FPATH
+    print 'Total run time = %s sec' %run_time
+    return
 
 
 if __name__ == '__main__':
