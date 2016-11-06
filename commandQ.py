@@ -7,18 +7,18 @@ import fcntl
 import os
 import random
 import subprocess
+import sys
 import time
 
 
-QUEUE_FPATH = os.path.expandvars(os.path.expanduser('~/command.queue'))
-LOCK_FPATH = os.path.expandvars(os.path.expanduser('~/command.lock'))
+QUEUE_FPATH = os.path.expandvars(os.path.expanduser('~/.command_queue'))
 
 
 def get_command(timeout):
     t0 = time.time()
     timeout_time = t0 + timeout
     while time.time() < timeout_time:
-        lockf = open(LOCK_FPATH, 'w')
+        lockf = open(QUEUE_FPATH + '.lock', 'w')
         try:
             fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError, err:
@@ -27,12 +27,13 @@ def get_command(timeout):
                 continue
             else:
                 raise
+
         try:
             with open(QUEUE_FPATH, 'r') as queue:
                 commands = queue.readlines()
-                this_command = commands.pop().strip()
+                this_command = commands.pop(0).strip()
             if len(commands) == 0:
-                os.remove(QUEUE_FPATH)
+                break
             else:
                 with open(QUEUE_FPATH, 'w') as queue:
                     queue.writelines(commands)
@@ -46,7 +47,7 @@ def get_command(timeout):
             lockf.close()
 
     # If you get here, then failed to get command
-    raise TimeoutError('Failed to get a command in %s sec.' %timeout)
+    raise Exception('Timeout: Failed to get a command in %s sec.' %timeout)
 
 
 def run_command(command, cpu_threads=1, cpu_cores=None, gpus=None):
@@ -63,7 +64,6 @@ def run_command(command, cpu_threads=1, cpu_cores=None, gpus=None):
         if not isinstance(gpus, basestring):
             raise ValueError('Unhandled `gpus`: "%s" of type %s'
                              %(gpus, type(gpus)))
-        # export CUDA_VISIBLE_DEVICES=gpus
         env['CUDA_VISIBLE_DEVICES'] = gpus
 
     env['MKL_NUM_THREADS'] = format(cpu_threads, 'd')
@@ -93,26 +93,61 @@ def parse_args():
 def main():
     queue_start_time = time.time()
     args = parse_args()
+    print ('Queue worker process started to launch jobs with'
+           ' CUDA_VISIBLE_DEVICES=%s' %args.gpu)
 
+    previous_command_none = False
     while True:
-        print '='*80
-        print 'Getting a new command...'
         command = get_command(args.timeout)
+
         if command is None:
-            break
+            previous_command_none = True
+            wstdout('.')
+            time.sleep(30 + random.random())
+            continue
+
+        if previous_command_none:
+            previous_command_none = False
+            wstdout('\n')
+
+        # Don't do anything for trivial commands
+        stripped = command.strip()
+        if len(stripped) == 0 or stripped.startswith('#'):
+            continue
+
+        print '='*80
         print 'Command to be run:\n    ' + command
+        print ''
         print '>'*80
         t0 = time.time()
         ret = run_command(command=command, gpus=args.gpu)
         t1 = time.time()
         print '<'*80
-        print 'Command run time = %s sec' %(t1-t0)
+        print ''
+        dt = t1 - t0
+        print 'Command run time = %s (%s s)' %(hms(dt), dt)
         print '\n\n'
 
     run_time = time.time() - queue_start_time
     print '\nQueue exhausted (file %s no longer exists).' %QUEUE_FPATH
-    print 'Total run time = %s sec' %run_time
+    print 'Total run time = %s (%s sec)' %(hms(run_time), run_time)
     return
+
+
+def hms(s):
+    h, r = divmod(s, 3600)
+    m, s = divmod(r, 60)
+    return '%02d:%02d:%s' %(h, m, s)
+
+
+def wstdout(s):
+    sys.stdout.write(s)
+    sys.stdout.flush()
+
+
+def wstderr(s):
+    sys.stderr.write(s)
+    sys.stderr.flush()
 
 
 if __name__ == '__main__':
