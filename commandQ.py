@@ -46,16 +46,18 @@ def get_command(timeout):
                 continue
             else:
                 raise
-
         try:
             with open(QUEUE_FPATH, 'r') as queue:
                 commands = queue.readlines()
+
+            if len(commands) > 0:
                 this_command = commands.pop(0).strip()
-            if len(commands) == 0:
-                break
             else:
-                with open(QUEUE_FPATH, 'w') as queue:
-                    queue.writelines(commands)
+                this_command = None
+
+            with open(QUEUE_FPATH, 'w') as queue:
+                queue.writelines(commands)
+
             return this_command
 
         except IOError, err:
@@ -124,7 +126,7 @@ def append(command, timeout=DFLT_TIMEOUT):
             fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError, err:
             if err.errno == 11:
-                time.sleep(random.random()/10.0)
+                time.sleep(random.random()*timeout/100)
                 continue
             else:
                 raise
@@ -168,7 +170,7 @@ def extend(commands, timeout=DFLT_TIMEOUT):
             fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError, err:
             if err.errno == 11:
-                time.sleep(random.random()/10.0)
+                time.sleep(random.random()*timeout/100)
                 continue
             else:
                 raise
@@ -189,9 +191,8 @@ def extend(commands, timeout=DFLT_TIMEOUT):
                     command += '\n'
                 new_commands.append(command)
 
-            current_commands.extend(new_commands)
             with open(QUEUE_FPATH, 'w') as queue:
-                queue.writelines(commands)
+                queue.writelines(current_commands + new_commands)
 
             return
 
@@ -242,12 +243,23 @@ def run_command(command, cpu_threads=1, cpu_cores=None, gpus=None, retry_failed=
         print exc_str
 
         if retry_failed:
-            shell_safe_exc = [('# %s\n' % l) for l in tb.split('\n')]
+            shell_safe_exc = [('# %s\n' % l) for l in exc_str.split('\n')]
 
-            # Put the command to the end of the queue (in case it will always fail)
-            append('# The following command failed or was cancelled; error message:')
-            extend(shell_safe_exc)
-            append(command)
+            # Put the command to the end of the queue (in case it will always
+            # fail)
+            lines = [
+                '',
+                '#' + '>'*78,
+                '# EXCEPTION IN COMMAND BELOW; WILL RETRY. TRACEBACK:',
+                '#'
+            ]
+            lines.extend(shell_safe_exc)
+            lines.append(command)
+            lines.extend([
+                '#' + '<'*78,
+                ''
+            ])
+            extend(lines)
 
         if kill:
             raise
