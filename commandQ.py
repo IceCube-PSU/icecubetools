@@ -1,8 +1,12 @@
 #!/usr/bin/env python
+"""
+Simple command queue.
+"""
 
+from __future__ import division
 
 from argparse import ArgumentParser
-from collections import Sequence
+from collections import Iterable, Sequence
 import datetime
 import fcntl
 import os
@@ -10,9 +14,23 @@ import random
 import subprocess
 import sys
 import time
+import traceback
+
+__author__ = 'J.L. Lanfranchi'
+__date__ = '2016-11-07'
 
 
 QUEUE_FPATH = os.path.expandvars(os.path.expanduser('~/.command_queue'))
+DFLT_TIMEOUT = 10 # seconds
+
+
+def mkdir(d):
+    try:
+        os.makedirs(d, mode=0750)
+    except OSError as err:
+        # Ignore "dir already exists" error; raise otherwise
+        if err[0] != 17:
+            raise err
 
 
 def get_command(timeout):
@@ -24,7 +42,7 @@ def get_command(timeout):
             fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError, err:
             if err.errno == 11:
-                time.sleep(random.random()/10.0)
+                time.sleep(random.random()*timeout/100)
                 continue
             else:
                 raise
@@ -51,7 +69,144 @@ def get_command(timeout):
     raise Exception('Timeout: Failed to get a command in %s sec.' %timeout)
 
 
-def run_command(command, cpu_threads=1, cpu_cores=None, gpus=None):
+def insert(index, object, timeout=DFLT_TIMEOUT):
+    dirname = os.path.dirname(QUEUE_FPATH)
+    if dirname != '':
+        mkdir(dirname)
+
+    t0 = time.time()
+    timeout_time = t0 + timeout
+    while time.time() < timeout_time:
+        lockf = open(QUEUE_FPATH + '.lock', 'w')
+        try:
+            fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError, err:
+            if err.errno == 11:
+                time.sleep(random.random()*timeout/100)
+                continue
+            else:
+                raise
+
+        try:
+            try:
+                with open(QUEUE_FPATH, 'r') as queue:
+                    commands = queue.readlines()
+            except IOError, err:
+                # Only allow "No such file or directory" error
+                if err.errno != 2:
+                    raise
+                commands = []
+            if not command.endswith('\n'):
+                command += '\n'
+            commands.insert(index, command)
+            with open(QUEUE_FPATH, 'w') as queue:
+                queue.writelines(commands)
+
+            return
+
+        finally:
+            lockf.close()
+
+    # If you get here, then failed to get command
+    raise Exception('Timeout: Failed to get a command in %s sec.' %timeout)
+
+
+def append(command, timeout=DFLT_TIMEOUT):
+    dirname = os.path.dirname(QUEUE_FPATH)
+    if dirname != '':
+        mkdir(dirname)
+
+    t0 = time.time()
+    timeout_time = t0 + timeout
+    while time.time() < timeout_time:
+        lockf = open(QUEUE_FPATH + '.lock', 'w')
+        try:
+            fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError, err:
+            if err.errno == 11:
+                time.sleep(random.random()/10.0)
+                continue
+            else:
+                raise
+
+        try:
+            try:
+                with open(QUEUE_FPATH, 'r') as queue:
+                    commands = queue.readlines()
+            except IOError, err:
+                # Only allow "No such file or directory" error
+                if err.errno != 2:
+                    raise
+                commands = []
+            if not command.endswith('\n'):
+                command += '\n'
+            commands.append(command)
+            with open(QUEUE_FPATH, 'w') as queue:
+                queue.writelines(commands)
+
+            return
+
+        finally:
+            lockf.close()
+
+    # If you get here, then failed to get command
+    raise Exception('Timeout: Failed to get a command in %s sec.' %timeout)
+
+
+def extend(commands, timeout=DFLT_TIMEOUT):
+    assert isinstance(commands, Iterable)
+
+    dirname = os.path.dirname(QUEUE_FPATH)
+    if dirname != '':
+        mkdir(dirname)
+
+    t0 = time.time()
+    timeout_time = t0 + timeout
+    while time.time() < timeout_time:
+        lockf = open(QUEUE_FPATH + '.lock', 'w')
+        try:
+            fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except IOError, err:
+            if err.errno == 11:
+                time.sleep(random.random()/10.0)
+                continue
+            else:
+                raise
+
+        try:
+            try:
+                with open(QUEUE_FPATH, 'r') as queue:
+                    current_commands = queue.readlines()
+            except IOError, err:
+                # Only allow "No such file or directory" error
+                if err.errno != 2:
+                    raise
+                current_commands = []
+
+            new_commands = []
+            for command in commands:
+                if not command.endswith('\n'):
+                    command += '\n'
+                new_commands.append(command)
+
+            current_commands.extend(new_commands)
+            with open(QUEUE_FPATH, 'w') as queue:
+                queue.writelines(commands)
+
+            return
+
+        finally:
+            lockf.close()
+
+    # If you get here, then failed to get command
+    raise Exception('Timeout: Failed to get a command in %s sec.' %timeout)
+
+
+def push(command, timeout):
+    insert(0, command, timeout=timeout)
+
+
+def run_command(command, cpu_threads=1, cpu_cores=None, gpus=None, retry_failed=True):
     env = os.environ.copy()
 
     if cpu_cores is not None:
@@ -70,8 +225,32 @@ def run_command(command, cpu_threads=1, cpu_cores=None, gpus=None):
     env['MKL_NUM_THREADS'] = format(cpu_threads, 'd')
     env['OMP_NUM_THREADS'] = format(cpu_threads, 'd')
 
-    ret = subprocess.call(command, env=env, shell=True,
-                          stderr=subprocess.STDOUT)
+    is_exc = False
+    kill = False
+    try:
+        ret = subprocess.call(command, env=env, shell=True,
+                              stderr=subprocess.STDOUT)
+    except (KeyboardInterrupt, SystemExit):
+        is_exc = True
+        kill = True
+    except:
+        is_exc = True
+        kill = False
+
+    if is_exc:
+        exc_str = traceback.format_exc()
+        print exc_str
+
+        if retry_failed:
+            shell_safe_exc = [('# %s\n' % l) for l in tb.split('\n')]
+
+            # Put the command to the end of the queue (in case it will always fail)
+            append('# The following command failed or was cancelled; error message:')
+            extend(shell_safe_exc)
+            append(command)
+
+        if kill:
+            raise
 
     return ret
 
@@ -84,7 +263,7 @@ def parse_args():
         process'''
     )
     parser.add_argument(
-        '--timeout', type=int, default=10,
+        '--timeout', type=int, default=DFLT_TIMEOUT,
         help='''Default timeout (seconds)'''
     )
     args = parser.parse_args()
