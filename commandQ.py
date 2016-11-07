@@ -3,6 +3,7 @@
 
 from argparse import ArgumentParser
 from collections import Sequence
+import datetime
 import fcntl
 import os
 import random
@@ -116,7 +117,8 @@ def main():
             continue
 
         print '='*80
-        print 'Command to be run:\n    ' + command
+        print 'Started: {:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now())
+        print 'Command to be run:\n%s' %command
         print ''
         print '>'*80
         t0 = time.time()
@@ -124,9 +126,9 @@ def main():
         t1 = time.time()
         print '<'*80
         print ''
+        print 'Finished: {:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now())
         dt = t1 - t0
-        print 'Command run time = %s (%s s)' %(hms(dt), dt)
-        print '\n\n'
+        print 'Command run time = %s (%s s)\n\n' %(hms(dt), dt)
 
     run_time = time.time() - queue_start_time
     print '\nQueue exhausted (file %s no longer exists).' %QUEUE_FPATH
