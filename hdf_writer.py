@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-
 """
 Take a bunch of i3 files and a txt file containing a list of frame objects and
 write a HDF file
 
 created by lschulte on 19/12/12
 """
+
 
 from optparse import OptionParser
 
@@ -48,7 +48,8 @@ if __name__ == '__main__':
         tableservice=hdf_service,
         keys=keys,
         #BookEverything=True,
-        SubEventStreams=['fullevent', 'SLOPSplit', 'InIceSplit', 'in_ice', 'nullsplitter']
+        SubEventStreams=['fullevent', 'SLOPSplit', 'InIceSplit', 'in_ice',
+                         'nullsplitter']
     )
     tray.AddModule('TrashCan', 'byebye')
     tray.Execute()

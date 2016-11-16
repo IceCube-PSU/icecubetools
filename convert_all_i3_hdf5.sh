@@ -3,7 +3,7 @@
 START=`date`
 echo $START
 
-HDFWRITER=${HOME}'/cowen/icecubetools/HDFwriter.py'
+HDFWRITER="${PSUI3TOOLS}/HDFWriter.py"
 
 [[ ($# -eq 3) || ($# -eq 5) ]] || { echo "Supply 3 or 5 arguments"; exit 1; }
 
