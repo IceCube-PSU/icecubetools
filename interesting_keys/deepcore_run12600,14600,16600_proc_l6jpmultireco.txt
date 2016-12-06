@@ -3,6 +3,7 @@ CascadeLast_DCParams
 DipoleFit_DC
 DipoleFit_DCParams
 FiniteRecoFit
+I3MCEventHeader
 I3MCTree
 I3MCWeightDict
 IC86_Dunkman_L3_Vars
