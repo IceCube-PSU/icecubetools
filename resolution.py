@@ -136,9 +136,11 @@ def uncertainty(res, N, conf=0.683, data=None, kind='root_n'):
 
     Parameters
     ----------
-    res:  Resolutions
+    res
+        Resolutions
 
-    N:    Number of points that contributed to each resolution
+    N : int
+        Number of points that contributed to each resolution
 
     conf: Confidence level of uncertainty (default=0.683, or one sigma)
 

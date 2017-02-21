@@ -23,15 +23,21 @@ SOURCE_I3_RE = re.compile(r'(.*)\.(i3)(\.bz2){0,1}$', re.IGNORECASE)
 
 
 def pushEventsCriteria(inputI3, outputI3, criteria, debug=False):
-    """
-    Grabs events meeting a certain criteria from input file and pushes them to
-    the output file.
+    """Grabs events meeting a certain criteria from input file and pushes them
+    to the output file.
 
-    inputI3 and outputI3 should be already opened (via I3File);
+    Parameters
+    ----------
+    inputI3, outputI3 : open dataio.I3File objects
 
-    criteria should contain a list of dictionaries of the following format:
+    criteria : list of dicts
+        List of dictionaries of the following format:
         { (key, (field, operator, value)) }
 
+    debug : bool
+
+    Notes
+    -----
     where the following will be performed (return of True passes an event on):
         operator(frame[key].field, value)
 
@@ -45,6 +51,7 @@ def pushEventsCriteria(inputI3, outputI3, criteria, debug=False):
 
     Note that all specified criteria are AND-ed together to determine if
     an event will be kept.
+
     """
     from icecube import icetray
 
@@ -58,24 +65,24 @@ def pushEventsCriteria(inputI3, outputI3, criteria, debug=False):
         if frame.Stop == icetray.I3Frame.DAQ:
             skip += 1
 
-            #-- Default to keep this and its associated Physics (p) frame
+            # Default to keep this and its associated Physics (p) frame
             storeFrame = True
 
-            ##-- If there are no remaining events to grab, might as well quit!
+            ## If there are no remaining events to grab, might as well quit!
             #if len(eventIDs_remaining) == 0:
             #    break
 
-            #-- Debug mode stops after first 50 Q frames
+            # Debug mode stops after first 50 Q frames
             if debug > 0 and skip >= 50:
                 break
 
-            #-- Check all criteria for this frame
+            # Check all criteria for this frame
             for criterion in criteria:
                 for (key, (field, op, value)) in criterion.iteritems():
                     framekey = frame[key]
                     storeFrame &= op(framekey.get(field), value)
 
-        #-- Store whatever frame we're on, if the storeFrame flag is set...
+        # Store whatever frame we're on, if the storeFrame flag is set...
         if storeFrame:
             outputI3.push(frame)
 
@@ -86,13 +93,14 @@ def pushSelectEvents(inputI3, outputI3, eventsList, debug=False):
     """Grab events meeting a certain criteria from input file and push them to
     the output file.
 
-    inputI3 and outputI3 should be already opened, via
-      dataio.I3File(filename, 'r')
-      dataio.I3File(filename, 'w')
-    respectively
+    Parameters
+    ----------
+    inputI3, outputI3 : open dataio.I3File objects (the latter in write mode)
+    eventsList : list of dicts
+        List of dictionaries with either 'skip', 'eventID', or both, to
+        uniquely identify an event
+    debug : bool
 
-    eventsList should contain dictionaries with either 'skip', 'eventID', or
-    both, to uniquely identify an event
     """
     from icecube import icetray
 
@@ -108,15 +116,15 @@ def pushSelectEvents(inputI3, outputI3, eventsList, debug=False):
         if frame.Stop == icetray.I3Frame.DAQ:
             skip += 1
 
-            #-- Default to not keeping this and its associated Physics
+            # Default to not keeping this and its associated Physics
             #   frame (p-frame)
             storeFrame = False
 
-            #-- If there are no remaining events to grab, might as well quit!
+            # If there are no remaining events to grab, might as well quit!
             if len(eventIDs_remaining) == 0:
                 break
 
-            #-- Debug mode stops after first 50 Q frames
+            # Debug mode stops after first 50 Q frames
             if (debug > 0) and (skip >= 50):
                 break
 
@@ -138,27 +146,27 @@ def pushSelectEvents(inputI3, outputI3, eventsList, debug=False):
                     )
                 eventIDs_remaining.remove(header.event_id)
 
-        #-- Store whatever frame we're on, if the storeFrame flag is set...
+        # Store whatever frame we're on, if the storeFrame flag is set...
         if storeFrame:
             outputI3.push(frame)
 
     del frame
 
 
-def pushEventsByCriteria(inputI3, outputI3, criteriaList, debug=False):
+def pushEventsByCriteria(inputI3, outputI3, criteriaList):
     """Grab events from an input file and push those events (and all their
     associated P, Q, and other types of frames) that meet all specified
     criteria to the output file.
 
-    inputI3 and outputI3 should be already opened, via
-      dataio.I3File(filename, 'r')
-      dataio.I3File(filename, 'w')
-    respectively
+    Parameters
+    ----------
+    inputI3, outputI3 : open dataio.I3File objects (the latter in write mode)
+    criteriaList : list of callables
+        Each callable a function that operate on a frame, each of which returns
+        True (to keep) or False (to throw away). *All* criteria must be met for
+        *any one frame* in the sequence for the entire sequence to be written
+        to the output I3 file.
 
-    criteriaList should be a list of functions that operate on a frame, each of
-    which returns True (to keep) or False (to throw away). *All* criteria must
-    be met for *any one frame* in the sequence for the entire sequence to be
-    written to the output I3 file.
     """
     from icecube import icetray
 
@@ -174,8 +182,8 @@ def pushEventsByCriteria(inputI3, outputI3, criteriaList, debug=False):
                 for f in frameSequenceBuffer:
                     outputI3.push(f)
 
-            # Reset the flags and clear the buffer, as a DAQ frame indicates the
-            # start of a new sequence of frames that will all be associated
+            # Reset the flags and clear the buffer, as a DAQ frame indicates
+            # the start of a new sequence of frames that will all be associated
             # with this DAQ frame
             storeSequenceFlags = []
             frameSequenceBuffer = []
@@ -212,24 +220,30 @@ def get_keys(i3fname):
     keys = set()
     try:
         while inputI3.more():
+            if frame.Stop not in [icetray.I3Frame.DAQ,
+                                  icetray.I3Frame.Physics]:
+                continue
             frame = inputI3.pop_frame()
             keys = keys.union(frame.keys())
         del frame
     finally:
         inputI3.close()
 
-    return keys
+    return sorted(keys)
 
 
 def countEvents(i3fname, debug=False):
-    """Count the number of events (number of Q frames, actually) in an i3
-    file
+    """Count the number of events (number of Q frames, actually) in an i3 file
+
+    Parameters
+    ----------
+    i3fname : string
+    debug : bool
 
     """
     from icecube import dataio, icetray
 
     inputI3 = dataio.I3File(i3fname, 'r')
-
     try:
         frameCount = 0
         while inputI3.more():
@@ -238,7 +252,7 @@ def countEvents(i3fname, debug=False):
                 frameCount += 1
                 #header = frame['I3EventHeader']
 
-            #-- Debug mode stops after first 50 Q frames
+            # Debug mode stops after first 50 Q frames
             if debug > 0 and frameCount >= 50:
                 break
         del frame
@@ -349,17 +363,34 @@ class Split(object):
 
 
 def countEventsInAllI3Files(rootdir='.', recurse=False):
+    """Count events (Q-frames) in all I3 files in a directory (and optionally
+    recursing into sub-directories).
+
+    Parameters
+    ----------
+    rootdir : string
+    recurse : bool
+
+    """
     digits = 12
-    f_iter = GUTIL.findFiles('.', regex=r'.*i3(\.tar){0,1}(\.bz2){0,1}', recurse=recurse)
+    f_iter = GUTIL.findFiles(
+        rootdir,
+        regex=r'.*i3(\.tar){0,1}(\.bz2){0,1}',
+        recurse=recurse
+    )
     total_count = 0
     f_count = []
-    GUTIL.wstdout(('%'+str(digits)+'s   %s\n') % ('Event count', 'File path'))
-    GUTIL.wstdout(('%'+str(digits)+'s   %s\n') % ('-'*digits, '-'*(80-digits-3)))
+    GUTIL.wstdout(('%'+str(digits)+'s   %s\n')
+                  % ('Event count', 'File path'))
+    GUTIL.wstdout(('%'+str(digits)+'s   %s\n')
+                  % ('-'*digits, '-'*(80-digits-3)))
+
     for f_path, _, _ in f_iter:
         count = countEvents(f_path)
         total_count += count
         f_count.append((f_path, count))
         GUTIL.wstdout(('%'+str(digits)+'d   %s\n') % (count, f_path))
+
     GUTIL.wstdout(('-'*digits+'\n'))
     GUTIL.wstdout(
         ('%'+str(digits)+'s total DAQ (Q) frames contained in %d files\n')
@@ -368,9 +399,15 @@ def countEventsInAllI3Files(rootdir='.', recurse=False):
 
 
 def getEventPhysicsFrames(i3fname, idx=0, debug=False):
-    """
-    Grabs event's physics frame(s) in a list, by event index (i.e., DAQ frame
-    index, starting at 0 for first DAQ fraome in the I3 file)
+    """Grabs event's physics frame(s) in a list, by event index (i.e., DAQ
+    frame index, starting at 0 for first DAQ fraome in the I3 file).
+
+    Parameters
+    ----------
+    i3fname : string
+    idx : int
+    debug : bool
+
     """
     from icecube import dataio, icetray
 
@@ -384,16 +421,16 @@ def getEventPhysicsFrames(i3fname, idx=0, debug=False):
             if frame.Stop == icetray.I3Frame.DAQ:
                 skip += 1
 
-                #-- If storeFrame is set, then job is already done since
-                #   we've reached the next DAQ frame
+                # If storeFrame is set, then job is already done since
+                # we've reached the next DAQ frame
                 if storeFrame:
                     break
 
-                #-- Default to not keeping this and its associated Physics
-                #   frame (p-frame)
+                # Default to not keeping this and its associated Physics
+                # frame (p-frame)
                 storeFrame = False
 
-                #-- Debug mode stops after first 50 Q frames
+                # Debug mode stops after first 50 Q frames
                 if debug > 0 and skip >= 50:
                     break
 
@@ -425,7 +462,8 @@ def flattenFrameData(node, key, datadic={}, prefix='', sep='_'):
         for (sk, skk) in key.iteritems():
             newNode = node.__getattribute__(sk)
             flattenFrameData(
-                node=newNode, key=skk, datadic=datadic, prefix=prefix+sep+sk, sep=sep
+                node=newNode, key=skk, datadic=datadic, prefix=prefix+sep+sk,
+                sep=sep
             )
 
 
@@ -447,7 +485,8 @@ def passAllCuts(frame): #, must_pass_step2=False):
     #if header.run_id in PGEN.runs355_357:
     #    if (frame['Cuts_V4_Step1'] and frame['Cuts_V4_Step2']):
     #        return True
-    if header.run_id in PGEN.runs355_357 + PGEN.runs363_365 + PGEN.runs369_371 + PGEN.runs388_390:
+    if header.run_id in (PGEN.runs355_357 + PGEN.runs363_365 + PGEN.runs369_371
+                         + PGEN.runs388_390):
         #if frame['Cuts_V5_Step1'].value:
         if frame['Cuts_V5_Step1']: # and frame['Cuts_V5_Step2']:
             return True
@@ -503,18 +542,18 @@ if __name__ == "__main__":
     for (path, outputname) in zip(eventFilePaths, outputnames):
         eventsToProcess = readJustinTSV(path)
 
-        #-- Organize by source file
+        # Organize by source file
         fnames = list(set([event['srcfname'] for event in eventsToProcess]))
         fnames.sort()
 
-        #-- Construct output I3 file name
+        # Construct output I3 file name
         base = os.path.basename(eventsToProcess[0]['srcfname'])
         fname_re = re.compile(r'^([a-zA-Z0-9_]+\.[0-9]+)\.')
         source_i3fname = eventSelID + outputname + '_' + \
                 '.'.join(fname_re.findall(base)[0:2]) + '.i3'
         source_i3path = os.path.join(outputdir, source_i3fname)
 
-        #-- Display status to user
+        # Display status to user
         GUTIL.wstdout('# Processing events listed in\n')
         GUTIL.wstdout('#   ' + path + '\n')
         GUTIL.wstdout('#\n')
@@ -536,7 +575,8 @@ if __name__ == "__main__":
                 )
                 input_i3f = dataio.I3File(fname, 'r')
                 try:
-                    pushSelectEvents(input_i3f, source_i3f, thisFileEvents, debug=debug)
+                    pushSelectEvents(input_i3f, source_i3f, thisFileEvents,
+                                     debug=debug)
                 finally:
                     input_i3f.close()
                 if debug > 0:
