@@ -31,7 +31,8 @@ import time
 # Justin's personal scripts (from ~jll1062/mypy/bin)
 from genericUtils import nsort, timediffstamp, wstderr, wstdout
 from repeated_reco import (EXTENSION, FIT_FIELD_SUFFIX, LOCK_SUFFIX, RECO_RE,
-                           RECOS, pathFromRecos, read_lockfile, recosFromPath)
+                           RECOS, acquire_lock, pathFromRecos, read_lockfile,
+                           recosFromPath)
 
 
 __all__ = ['CleanupRecoFiles', 'parse_args', 'main']
@@ -299,21 +300,27 @@ class CleanupRecoFiles(object):
                 self._remove(lockfilepath)
                 continue
 
-            # 2. If lock file has outdated format, remove it
-            #    * Remove locked file if...?
-            lock_info = read_lockfile(lockfilepath)
-            if 'type' not in lock_info.keys():
-                self._remove(lockfilepath)
-                continue
+            # NOTE: temporarily removed this section since for a time the lock
+            # files were being overwritten, so they're 0-length... but still
+            # valid. Once the set of runs done on 2017-02-22 completes, I think
+            # this issue is fixed and so this sectoun should be re-introduced.
 
-            # 3. If lock is expired, remove the lock file
-            if lock_info['expires_at'] > time.time():
-                # Remove locked file if lock type is outfile_lock, as this
-                # means the output file was not fully written before the
-                # process died
-                if lock_info['type'] == 'outfile_lock':
-                    self._remove(lock_info['outfile'])
-                self._remove(lockfilepath)
+            lock_info = read_lockfile(lockfilepath)
+
+            ## 2. If lock file has outdated format, remove it
+            ##    * Remove locked file if...?
+            #if 'type' not in lock_info.keys():
+            #    self._remove(lockfilepath)
+            #    continue
+
+            ## 3. If lock is expired, remove the lock file
+            #if lock_info['expires_at'] > time.time():
+            #    # Remove locked file if lock type is outfile_lock, as this
+            #    # means the output file was not fully written before the
+            #    # process died
+            #    if lock_info['type'] == 'outfile_lock':
+            #        self._remove(lock_info['outfile'])
+            #    self._remove(lockfilepath)
 
             # TODO: the following might require some ssh magic, and/or qstat
             # magic... whatever it is, it'll be a lot of magic to get it to
@@ -324,6 +331,23 @@ class CleanupRecoFiles(object):
 
             # 4. If lock is not expired but process is dead, remove lock
             #    * Remove locked file if lock type is outfile_lock
+
+            # 5. If lock can be acquired on the file, then the lock has expired
+            #    and therefore should be deleted.
+            try:
+                acquire_lock(lockfilepath)
+            except IOError, err:
+                if err.errno == 11:
+                    continue
+                raise
+            except:
+                raise
+            else:
+                # TODO: remove this clause once the buggy runs where lock files
+                # were being overwritten has been cleaned up
+                if 'type' in lock_info and lock_info['type'] == 'outfile_lock':
+                    self._remove(lock_info['outfile'])
+                self._remove(lockfilepath)
 
         self.report()
         wstdout('>     Time to clean up lock files: %s\n'

@@ -17,7 +17,7 @@ HybridReco run with various MultiNest parameters for accuracy comparisons.
 from __future__ import division, print_function
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from collections import OrderedDict
+from collections import Mapping, OrderedDict
 from copy import deepcopy
 from fcntl import flock, LOCK_EX, LOCK_NB
 import getpass
@@ -28,6 +28,7 @@ import operator
 from os import environ, getpid, remove
 from os.path import (abspath, basename, dirname, expanduser, expandvars,
                      getsize, isdir, isfile, join)
+import pwd
 import random
 import re
 import signal
@@ -63,7 +64,11 @@ LOCK_AQC_TIMEOUT = 1 # sec
 RECO_RE = re.compile(r'_recos([\s0-9,\-]+)')
 
 GROUP = 'dfc13_collab'
-GID = grp.getgrnam(GROUP).gr_gid
+GID = None
+try:
+    GID = grp.getgrnam(GROUP).gr_gid
+except KeyError:
+    GID = pwd.getpwnam(getpass.getuser()).pw_gid
 MODE = 0666
 
 NUM_LIVEPOINTS = [1000, 10000]
@@ -230,6 +235,68 @@ def pathFromRecos(orig_path, recos, ext=EXTENSION):
 
     # Put it all together
     return RECO_RE.sub('', orig_path) + reco_str + ext
+
+
+def acquire_lock(lock_path, lock_info):
+    """Acquire a lock on the file at `lock_path` and record `lock_info` to
+    that file.
+
+    Parameters
+    ----------
+    lock_path : string
+    lock_info : None or Mapping
+
+    Returns
+    -------
+    lock_f : file object
+        This holds an exlcusive lock; close the file or use fcntl.flock to
+        release the lock.
+
+    Raises
+    ------
+    IOError: [Errno 11] Resource temporarily unavailable
+        The lock is held by a different process on the file. Note that the
+        same process can re-acquire a lock infinitely many times (but there
+        is no lock counter, so the first file descriptor to be closed or
+        explicitly release the lock also releases the lock for all other
+        instaces within the process).
+    ValueError: I/O operation on closed file
+        This might be the case if the file has disappeared between opening it
+        and actually acquiring the exclusive lock.
+
+    Notes
+    -----
+    See
+        https://loonytek.com/2015/01/15/advisory-file-locking-differences-between-posix-and-bsd-locks
+    for more info about locks. Note that this function uses flock, i.e.
+    POSIX--not BSD--locking. This means that it should work even with an NFS
+    filesystem, although there are other tradeoffs as well. And locking is
+    "cooperative," so another process can simply ignore the `flock` locking
+    protocol altogether and read/write/delete the file.
+
+    """
+    lock_acq_timeout_time = time.time() + LOCK_AQC_TIMEOUT
+    while time.time() <= lock_acq_timeout_time:
+        lock_f = file(lock_path, 'a')
+        try:
+            flock(lock_f, LOCK_EX | LOCK_NB)
+        except IOError, err:
+            if err.errno == 11:
+                time.sleep(random.random()*LOCK_AQC_TIMEOUT/100)
+                continue
+            else:
+                raise
+
+    if isinstance(lock_info, Mapping):
+        # Write info out to the lock through a new, write-able file
+        # descriptor; note that the lock is still held by the `lock`
+        # file descriptor.
+        with file(lock_path, 'w') as lock_w:
+            for k, v in lock_info.items():
+                lock_w.write(LOCK_FMT % (k, v))
+            chown_and_chmod(lock_w, gid=GID, mode=MODE)
+
+    return lock_f
 
 
 def read_lockfile(path):
@@ -510,7 +577,7 @@ def main():
     # Import IceCube things now
     from I3Tray import I3Tray
     from icecube import dataio, icetray, multinest_icetray
-    from include.cluster import get_spline_tables
+    from cluster import get_spline_tables
 
     lock_info = getProcessInfo()
 
@@ -532,21 +599,27 @@ def main():
         infile_path = file_lister.get_next_file()
 
         if infile_path is None:
-            wstdout('> No more files that can be processed. Quitting.\n\n')
+            wstdout('> No more files that can be processed. Quitting.\n')
             break
 
         # See if file still exists
         if not isfile(infile_path):
+            wstdout('> File no longer exists. Moving on. ("%s")\n'
+                    % infile_path)
             continue
 
         # Skip if empty input files
         if getsize(infile_path) == 0:
+            wstdout('> Input file is 0-length. Moving on. ("%s")\n'
+                    % infile_path)
             continue
 
         already_run = recosFromPath(infile_path)
         recos_not_run_yet = sorted(set(args.requested) - set(already_run))
 
         if len(recos_not_run_yet) == 0:
+            wstdout('> Nothing more to be done on file. Moving on. ("%s")\n'
+                    % infile_path)
             continue
 
         time_remaining = np.ceil(
@@ -555,7 +628,7 @@ def main():
 
         # See if any reco at all fits in the remaining time
         if time_remaining <= MIN_RECO_TIME:
-            wstdout('Not enough time to run another reco. Quitting.\n\n')
+            wstdout('Not enough time to run *any* reco. Quitting.\n')
             break
 
         # See if any of the recos needing to be run on *this* file fit in the
@@ -575,6 +648,8 @@ def main():
         expiration_timestamp = timestamp(at=expiration, utc=True)
 
         if len(recos_to_run) == 0:
+            wstdout('Not enough time to run any remaining reco on file. Moving'
+                    ' on. ("%s")\n' % infile_path)
             continue
 
         infile_lock_path = infile_path + LOCK_SUFFIX
@@ -592,7 +667,7 @@ def main():
         outfile_exists = False
         if isfile(outfile_path):
             wstdout('> Outfile path exists; will overwrite if both infile and'
-                    ' outfile locks can be obtained!\n'
+                    ' outfile locks can be obtained! ...\n'
                     '>     "%s"\n' % outfile_path)
             outfile_exists = True
 
@@ -604,9 +679,10 @@ def main():
 
         #if isfile(infile_lock_path):
         #    wstdout('> Infile lock exists; moving on to next file\n'
-        #            '>     "%s"\n\n' % infile_lock_path)
+        #            '>     "%s"\n' % infile_lock_path)
         #    continue
 
+        infile_lock_f, outfile_lock_f = None, None
         try:
             # NOTE:
             # Create lockfiles (if they don't exist) for each of the infile and
@@ -616,67 +692,47 @@ def main():
             # Also: write info to the lockfiles to know when it's okay to clean
             # each up manually. Note that the `flock` will be removed by the OS
             # as soon as the lock file is closed or when this process dies.
-
             lock_info['type'] = 'infile_lock'
-            lock_acq_timeout_time = time.time() + LOCK_AQC_TIMEOUT
-            while time.time() <= lock_acq_timeout_time:
-                infile_lock = file(infile_lock_path, 'w')
-                try:
-                    flock(infile_lock, LOCK_EX | LOCK_NB)
-                except IOError, err:
-                    if err.errno == 11:
-                        time.sleep(random.random()*LOCK_AQC_TIMEOUT/100)
-                        continue
-                    else:
-                        raise
-            for k, v in lock_info.items():
-                infile_lock.write(LOCK_FMT % (k, v))
-            chown_and_chmod(infile_lock, gid=GID, mode=MODE)
+            infile_lock_f = acquire_lock(infile_lock_path, lock_info)
 
             lock_info['type'] = 'outfile_lock'
-            lock_acq_timeout_time = time.time() + LOCK_AQC_TIMEOUT
-            while time.time() <= lock_acq_timeout_time:
-                outfile_lock = file(outfile_lock_path, 'w')
-                try:
-                    flock(outfile_lock, LOCK_EX | LOCK_NB)
-                except IOError, err:
-                    if err.errno == 11:
-                        time.sleep(random.random()*LOCK_AQC_TIMEOUT/100)
-                        continue
-                    else:
-                        raise
-            for k, v in lock_info.items():
-                outfile_lock.write(LOCK_FMT % (k, v))
-            chown_and_chmod(outfile_lock, gid=GID, mode=MODE)
+            outfile_lock_f = acquire_lock(outfile_lock_path, lock_info)
 
             try:
                 remove(outfile_path)
             except OSError, err:
                 # errno == 2 => "No such file or directory", which is OK since
-                # the point of `remove` is to make sure the path doesn't exist
+                # the point of `remove` is to make sure the path doesn't exist;
+                # otherwise, we can't go on since the output file exists but
+                # apparently cannot be overwritten
                 if err.errno != 2:
+                    wstdout('ERROR: obtained locks but outfile path exists and'
+                            ' cannot be removed.')
                     raise
-
         except:
             wstdout(
-                'ERROR: infile and/or outfile lock failed to write. Trying to'
-                ' clean up, and moving on to next file.\n'
+                'ERROR: infile and/or outfile locks failed to be obtained, or'
+                ' locks obtained but outfile cannot be overwritten.'
+                ' Cleaning up and moving on.\n'
                 '    "%s"\n'
                 '    "%s"\n'
-                % (infile_lock_path, outfile_lock_path)
+                '    "%s"\n'
+                % (infile_lock_path, outfile_lock_path, outfile_path)
             )
 
-            try:
-                infile_lock.close()
-                remove(infile_lock_path)
-            except (IOError, OSError):
-                pass
+            if infile_lock_f is not None:
+                infile_lock_f.close()
+            #try:
+            #    remove(infile_lock_path)
+            #except (IOError, OSError):
+            #    pass
 
-            try:
-                outfile_lock.close()
-                remove(outfile_lock_path)
-            except (IOError, OSError):
-                pass
+            if outfile_lock_f is not None:
+                outfile_lock_f.close()
+            #try:
+            #    remove(outfile_lock_path)
+            #except (IOError, OSError):
+            #    pass
 
             continue
 
@@ -748,7 +804,7 @@ def main():
             wstdout('> Time now: %s\n' % timestamp(utc=True))
             wstdout('> Time remaining after running %d reco(s): %s\n'
                     % (len(recos_to_run), timediffstamp(time_remaining)))
-            wstdout('> ' + '-'*77 + '\n\n')
+            wstdout('> ' + '-'*77 + '\n')
 
             signal.signal(signal.SIGINT, sigint_handler)
 
@@ -769,24 +825,28 @@ def main():
                             '>     "%s"\n' % infile_path)
                     remove(infile_path)
                 chown_and_chmod(outfile_path, gid=GID, mode=MODE)
+            finally:
+                try:
+                    remove(infile_lock_path)
+                except (IOError, OSError):
+                    pass
+
+                try:
+                    remove(outfile_lock_path)
+                except (IOError, OSError):
+                    pass
 
         finally:
             wstdout('> Removing infile lock\n'
                     '>     "%s"\n' % infile_lock_path)
-            try:
-                infile_lock.close()
-                remove(infile_lock_path)
-            except (IOError, OSError):
-                pass
+            if infile_lock_f is not None:
+                infile_lock_f.close()
 
             if outfile_lock_path is not None:
                 wstdout('> Removing outfile lock\n'
                         '>     "%s"\n' % outfile_lock_path)
-                try:
-                    outfile_lock.close()
-                    remove(outfile_lock_path)
-                except (IOError, OSError):
-                    pass
+                if outfile_lock_f is not None:
+                    outfile_lock_f.close()
             del tray
 
         dt = time.time() - start_time_sec
