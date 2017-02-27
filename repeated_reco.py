@@ -46,7 +46,7 @@ from smartFormat import lowPrec
 
 
 __all__ = ['EXTENSION', 'LOCK_SUFFIX', 'LOCK_SEP', 'LOCK_FMT',
-           'LOCK_AQC_TIMEOUT', 'RECO_RE', 'NUM_LIVEPOINTS', 'GROUP', 'GID',
+           'LOCK_ACQ_TIMEOUT', 'RECO_RE', 'NUM_LIVEPOINTS', 'GROUP', 'GID',
            'MODE',
            'TOLERANCES', 'NUM_BASIC_RECO_TRIALS', 'FIT_FIELD_SUFFIX',
            'MN_DEFAULT_KW', 'RECOS', 'MIN_RECO_TIME',
@@ -59,7 +59,7 @@ EXTENSION = '.i3.bz2'
 LOCK_SUFFIX = '.lock'
 LOCK_SEP = ' = '
 LOCK_FMT = '%s' + LOCK_SEP + '%s\n'
-LOCK_AQC_TIMEOUT = 1 # sec
+LOCK_ACQ_TIMEOUT = 0.01 # sec
 
 RECO_RE = re.compile(r'_recos([\s0-9,\-]+)')
 
@@ -70,35 +70,6 @@ try:
 except KeyError:
     GID = pwd.getpwnam(getpass.getuser()).pw_gid
 MODE = 0666
-
-NUM_LIVEPOINTS = [1000, 10000]
-TOLERANCES = [1e-2]
-NUM_BASIC_RECO_TRIALS = 10
-
-FIT_FIELD_SUFFIX = '_FitParams'
-MN_CONFIG_PREFIX = 'MN_Full_'
-MN_DEFAULT_KW = dict(
-    config_prefix=MN_CONFIG_PREFIX,
-    segment_length=7, # meters
-    has_mc_truth=True,
-    fit_cascade_direction=False,
-    #input_pulses=args.srt_pulse_name,
-    usecoszen=True,
-    mmodal=True,
-    consteff=False,
-    #numlive=75,
-    efr=1.0,
-    #tol=1.1,
-    #base_geometry='deepcore',
-    track_zenith_bounds=[-1, 1],
-    cascade_zenith_bounds=[-1, 1],
-    show_feedback=0,
-    #time_limit=time_limit, # sec
-    store_llhp_values=True,
-    raw_output_base_name='./MN-default',
-    write_raw_output_files=0,
-    #If=lambda f: f.Has('Cuts_V5.1_Step1') and f['Cuts_V5.1_Step1'].value
-)
 
 
 def getProcessInfo():
@@ -146,6 +117,34 @@ def constructRecoName(dims, numlive, tol, trial):
     return reco_name
 
 
+NUM_LIVEPOINTS = [1000, 10000]
+TOLERANCES = [1e-2]
+
+FIT_FIELD_SUFFIX = '_FitParams'
+MN_CONFIG_PREFIX = 'MN_Full_'
+MN_DEFAULT_KW = dict(
+    config_prefix=MN_CONFIG_PREFIX,
+    segment_length=7, # meters
+    has_mc_truth=True,
+    fit_cascade_direction=False,
+    #input_pulses=args.srt_pulse_name,
+    usecoszen=True,
+    mmodal=True,
+    consteff=False,
+    #numlive=75,
+    efr=1.0,
+    #tol=1.1,
+    #base_geometry='deepcore',
+    track_zenith_bounds=[-1, 1],
+    cascade_zenith_bounds=[-1, 1],
+    show_feedback=0,
+    #time_limit=time_limit, # sec
+    store_llhp_values=True,
+    raw_output_base_name='./MN-default',
+    write_raw_output_files=0,
+    #If=lambda f: f.Has('Cuts_V5.1_Step1') and f['Cuts_V5.1_Step1'].value
+)
+
 RECOS = []
 # High-resolution MultiNest runs
 for _numlive, _tol in product(NUM_LIVEPOINTS, TOLERANCES):
@@ -164,11 +163,56 @@ for _numlive, _tol in product(NUM_LIVEPOINTS, TOLERANCES):
     RECOS.append(
         dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
     )
-# Low-numpoints but re-run multiple times
-for _trial in range(NUM_BASIC_RECO_TRIALS):
+# "Standard" HybridReco settings from PINGU, re-run 10 times
+for _trial in range(10):
     _numlive = 75
     _tol = 1.1
     _time_limit = 150 * 60
+    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                   trial=_trial)
+    _kwargs = deepcopy(MN_DEFAULT_KW)
+    _kwargs['prefix'] = '%s_' % _reco_name
+    _kwargs['time_limit'] = _time_limit
+    _kwargs['numlive'] = _numlive
+    _kwargs['tol'] = _tol
+    RECOS.append(
+        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+    )
+# 50 livepoints, repeated 20 times
+for _trial in range(20):
+    _numlive = 50
+    _tol = 0.01
+    _time_limit = 100 * 60
+    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                   trial=_trial)
+    _kwargs = deepcopy(MN_DEFAULT_KW)
+    _kwargs['prefix'] = '%s_' % _reco_name
+    _kwargs['time_limit'] = _time_limit
+    _kwargs['numlive'] = _numlive
+    _kwargs['tol'] = _tol
+    RECOS.append(
+        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+    )
+# 25 livepoints, repeated 20 times
+for _trial in range(20):
+    _numlive = 25
+    _tol = 0.01
+    _time_limit = 50 * 60
+    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                   trial=_trial)
+    _kwargs = deepcopy(MN_DEFAULT_KW)
+    _kwargs['prefix'] = '%s_' % _reco_name
+    _kwargs['time_limit'] = _time_limit
+    _kwargs['numlive'] = _numlive
+    _kwargs['tol'] = _tol
+    RECOS.append(
+        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+    )
+# 10 livepoints, repeated 20 times
+for _trial in range(20):
+    _numlive = 10
+    _tol = 0.01
+    _time_limit = 30 * 60
     _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
                                    trial=_trial)
     _kwargs = deepcopy(MN_DEFAULT_KW)
@@ -237,7 +281,7 @@ def pathFromRecos(orig_path, recos, ext=EXTENSION):
     return RECO_RE.sub('', orig_path) + reco_str + ext
 
 
-def acquire_lock(lock_path, lock_info):
+def acquire_lock(lock_path, lock_info=None):
     """Acquire a lock on the file at `lock_path` and record `lock_info` to
     that file.
 
@@ -260,6 +304,7 @@ def acquire_lock(lock_path, lock_info):
         is no lock counter, so the first file descriptor to be closed or
         explicitly release the lock also releases the lock for all other
         instaces within the process).
+
     ValueError: I/O operation on closed file
         This might be the case if the file has disappeared between opening it
         and actually acquiring the exclusive lock.
@@ -275,26 +320,41 @@ def acquire_lock(lock_path, lock_info):
     protocol altogether and read/write/delete the file.
 
     """
-    lock_acq_timeout_time = time.time() + LOCK_AQC_TIMEOUT
+    lock_acq_timeout_time = time.time() + LOCK_ACQ_TIMEOUT
+    lock_f = file(lock_path, 'a')
+    lock_acquired = False
     while time.time() <= lock_acq_timeout_time:
-        lock_f = file(lock_path, 'a')
         try:
             flock(lock_f, LOCK_EX | LOCK_NB)
         except IOError, err:
             if err.errno == 11:
-                time.sleep(random.random()*LOCK_AQC_TIMEOUT/100)
+                wstdout('.')
+                time.sleep(random.random()*LOCK_ACQ_TIMEOUT/100)
                 continue
             else:
                 raise
+        else:
+            lock_acquired = True
 
-    if isinstance(lock_info, Mapping):
+    if not lock_acquired:
+        exc = IOError('[Errno 11] Resource temporarily unavailable')
+        exc.errno = 11
+        raise exc
+
+    if lock_info is not None:
+        assert isinstance(lock_info, Mapping)
         # Write info out to the lock through a new, write-able file
         # descriptor; note that the lock is still held by the `lock`
         # file descriptor.
         with file(lock_path, 'w') as lock_w:
             for k, v in lock_info.items():
                 lock_w.write(LOCK_FMT % (k, v))
-            chown_and_chmod(lock_w, gid=GID, mode=MODE)
+            try:
+                chown_and_chmod(lock_w, gid=GID, mode=MODE)
+            except OSError, err:
+                # errno 1 : operation not permitted (allowing this)
+                if err.errno != 1:
+                    raise
 
     return lock_f
 
@@ -316,6 +376,80 @@ def read_lockfile(path):
             v = int(v)
         lock_info[k] = v
     return lock_info
+
+
+def cleanup_lock_f(lock_f, force_remove=False):
+    """Remove a lock file and release the lock held on it (in that order, to
+    ensure another process doesn't create a new lockfile after releasing lock
+    and prior to this function removing the file). If that fails, though,
+    release the lock and remove the file.
+
+    Parameters
+    ----------
+    lock_f : open file object, or None
+        If None, this simply returns without an exception.
+
+    force_remove : bool
+        Remove the lock file even if we don't hold a lock on it. WARNING! This
+        is unsafe behavior in multi-threaded/multi-processing situations.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    AssertionError
+        If lock_f is not a file object
+
+    ValueError
+        If lock_f is a closed file object and `force_remove` is False
+
+    """
+    if lock_f is None:
+        return
+
+    assert isinstance(lock_f, file)
+
+    if lock_f.closed:
+        if force_remove:
+            try:
+                remove(lock_f.name)
+            except OSError, err:
+                # OSError.errno of 2 means file doesn't exist, which is fine;
+                # otherwise, raise the exception since the file could not be
+                # deleted.
+                if err.errno != 2:
+                    raise
+        else:
+            raise ValueError(
+                'Lock file is already closed; refusing to remove file.'
+            )
+    else:
+        removed = False
+        retry = 0
+        for retry in range(10):
+            if removed:
+                break
+            try:
+                remove(lock_f.name)
+            except Exception, err:
+                if isinstance(err, OSError) and err.errno == 2:
+                    removed = True
+                    break
+                elif err.errno == 5:
+                    removed = False
+            retry += 1
+            time.sleep(0.01)
+
+        lock_f.close()
+        if not removed:
+            try:
+                remove(lock_f.name)
+            except OSError, err:
+                # errno: 2=no file; 16=Device or resource busy
+                if err.errno not in [2, 16]:
+                    raise
 
 
 class EventCounter(object):
@@ -414,7 +548,6 @@ class FileLister(object):
         next_file : string
 
         """
-        time.sleep(random.random())
         if self.mode == 'infile':
             if self.used_file:
                 self.next_file = None
@@ -429,8 +562,7 @@ class FileLister(object):
     def _get_file_from_dir(self):
         while len(self.files) > 0:
             f = self.files.pop()
-            if not isfile(f + LOCK_SUFFIX):
-                return f
+            return f
         return None
 
 
@@ -602,6 +734,14 @@ def main():
             wstdout('> No more files that can be processed. Quitting.\n')
             break
 
+        already_run = recosFromPath(infile_path)
+        recos_not_run_yet = sorted(set(args.requested) - set(already_run))
+
+        if len(recos_not_run_yet) == 0:
+            wstdout('> Nothing more to be done on file. Moving on. ("%s")\n'
+                    % infile_path)
+            continue
+
         # See if file still exists
         if not isfile(infile_path):
             wstdout('> File no longer exists. Moving on. ("%s")\n'
@@ -611,14 +751,6 @@ def main():
         # Skip if empty input files
         if getsize(infile_path) == 0:
             wstdout('> Input file is 0-length. Moving on. ("%s")\n'
-                    % infile_path)
-            continue
-
-        already_run = recosFromPath(infile_path)
-        recos_not_run_yet = sorted(set(args.requested) - set(already_run))
-
-        if len(recos_not_run_yet) == 0:
-            wstdout('> Nothing more to be done on file. Moving on. ("%s")\n'
                     % infile_path)
             continue
 
@@ -652,6 +784,7 @@ def main():
                     ' on. ("%s")\n' % infile_path)
             continue
 
+        infile_lock_f, outfile_lock_f = None, None
         infile_lock_path = infile_path + LOCK_SUFFIX
         outfile_lock_path = None
         allrecos = set(recos_to_run).union(already_run)
@@ -671,70 +804,59 @@ def main():
                     '>     "%s"\n' % outfile_path)
             outfile_exists = True
 
-        #if isfile(outfile_lock_path):
-        #    wstdout('> Outfile lock exists; moving to next file\n'
-        #            '>     "%s"\n' % outfile_lock_path)
-        #    outfile_lock_path = None
-        #    continue
-
-        #if isfile(infile_lock_path):
-        #    wstdout('> Infile lock exists; moving on to next file\n'
-        #            '>     "%s"\n' % infile_lock_path)
-        #    continue
-
-        infile_lock_f, outfile_lock_f = None, None
+        # NOTE:
+        # Create lockfiles (if they don't exist) for each of the infile and
+        # outfile, and try to acquire exclusive locks on these before
+        # working with either the infile or outfile.
+        #
+        # Also: write info to the lockfiles to know when it's okay to clean
+        # each up manually. Note that the `flock` will be removed by the OS
+        # as soon as the lock file is closed or when this process dies.
+        lock_info['type'] = 'infile_lock'
         try:
-            # NOTE:
-            # Create lockfiles (if they don't exist) for each of the infile and
-            # outfile, and try to acquire exclusive locks on these before
-            # working with either the infile or outfile.
-            #
-            # Also: write info to the lockfiles to know when it's okay to clean
-            # each up manually. Note that the `flock` will be removed by the OS
-            # as soon as the lock file is closed or when this process dies.
-            lock_info['type'] = 'infile_lock'
             infile_lock_f = acquire_lock(infile_lock_path, lock_info)
-
-            lock_info['type'] = 'outfile_lock'
-            outfile_lock_f = acquire_lock(outfile_lock_path, lock_info)
-
-            try:
-                remove(outfile_path)
-            except OSError, err:
-                # errno == 2 => "No such file or directory", which is OK since
-                # the point of `remove` is to make sure the path doesn't exist;
-                # otherwise, we can't go on since the output file exists but
-                # apparently cannot be overwritten
-                if err.errno != 2:
-                    wstdout('ERROR: obtained locks but outfile path exists and'
-                            ' cannot be removed.')
-                    raise
-        except:
+        except IOError:
             wstdout(
-                'ERROR: infile and/or outfile locks failed to be obtained, or'
-                ' locks obtained but outfile cannot be overwritten.'
-                ' Cleaning up and moving on.\n'
+                '> infile lock failed to be obtained.'
                 '    "%s"\n'
-                '    "%s"\n'
-                '    "%s"\n'
-                % (infile_lock_path, outfile_lock_path, outfile_path)
+                % infile_lock_path
             )
-
-            if infile_lock_f is not None:
-                infile_lock_f.close()
-            #try:
-            #    remove(infile_lock_path)
-            #except (IOError, OSError):
-            #    pass
-
-            if outfile_lock_f is not None:
-                outfile_lock_f.close()
-            #try:
-            #    remove(outfile_lock_path)
-            #except (IOError, OSError):
-            #    pass
-
+            infile_lock_f = None
             continue
+
+        lock_info['type'] = 'outfile_lock'
+        try:
+            outfile_lock_f = acquire_lock(outfile_lock_path, lock_info)
+        except IOError:
+            wstdout(
+                'ERROR: outfile lock failed to be obtained.'
+                ' Cleaning up infile lock and moving on.\n'
+                '    "%s" (infile lock)\n'
+                '    "%s" (outfile lock)\n'
+                % (infile_lock_path, outfile_lock_path)
+            )
+            infile_lock_f = cleanup_lock_f(infile_lock_f)
+            continue
+
+        try:
+            remove(outfile_path)
+        except Exception, err:
+            # OSError.errno == 2 => "No such file or directory", which is OK
+            # since the point of `remove` is to make sure the path doesn't
+            # exist; otherwise, we can't go on since the output file exists but
+            # apparently cannot be overwritten
+            if not (isinstance(err, OSError) and err.errno == 2):
+                wstdout(
+                    '> ERROR: obtained locks but outfile path exists and cannot be'
+                    ' removed. Cleaning up locks and moving on.\n'
+                    '>     "%s" (outfile path)\n'
+                    '>     "%s" (infile_lock_path)\n'
+                    '>     "%s" (outfile_lock_path)\n'
+                    % (outfile_path, infile_lock_path, outfile_lock_path)
+                )
+                infile_lock_f = cleanup_lock_f(infile_lock_f)
+                outfile_lock_f = cleanup_lock_f(outfile_lock_f)
+                continue
 
         try:
             tray = I3Tray()
@@ -802,8 +924,11 @@ def main():
             wstdout('> Results will be output to file\n'
                     '>     "%s"\n' % outfile_path)
             wstdout('> Time now: %s\n' % timestamp(utc=True))
-            wstdout('> Time remaining after running %d reco(s): %s\n'
-                    % (len(recos_to_run), timediffstamp(time_remaining)))
+            wstdout(
+                '> Est. time remaining after running %d reco(s): %s\n'
+                % (len(recos_to_run),
+                   timediffstamp(after_proc_time_remaining, hms_always=True))
+            )
             wstdout('> ' + '-'*77 + '\n')
 
             signal.signal(signal.SIGINT, sigint_handler)
@@ -824,29 +949,16 @@ def main():
                     wstdout('> SUCCESS; removing now-obsolete infile\n'
                             '>     "%s"\n' % infile_path)
                     remove(infile_path)
-                chown_and_chmod(outfile_path, gid=GID, mode=MODE)
-            finally:
                 try:
-                    remove(infile_lock_path)
-                except (IOError, OSError):
-                    pass
-
-                try:
-                    remove(outfile_lock_path)
-                except (IOError, OSError):
-                    pass
+                    chown_and_chmod(outfile_path, gid=GID, mode=MODE)
+                except OSError, err:
+                    # errno 1 : operation not permitted (allowing this)
+                    if err.errno != 1:
+                        raise
 
         finally:
-            wstdout('> Removing infile lock\n'
-                    '>     "%s"\n' % infile_lock_path)
-            if infile_lock_f is not None:
-                infile_lock_f.close()
-
-            if outfile_lock_path is not None:
-                wstdout('> Removing outfile lock\n'
-                        '>     "%s"\n' % outfile_lock_path)
-                if outfile_lock_f is not None:
-                    outfile_lock_f.close()
+            infile_lock_f = cleanup_lock_f(infile_lock_f)
+            outfile_lock_f = cleanup_lock_f(outfile_lock_f)
             del tray
 
         dt = time.time() - start_time_sec
