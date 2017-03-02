@@ -26,8 +26,7 @@ import grp
 from itertools import product
 import operator
 from os import environ, getpid, remove
-from os.path import (abspath, basename, dirname, expanduser, expandvars,
-                     getsize, isdir, isfile, join)
+from os.path import abspath, basename, dirname, getsize, isdir, isfile, join
 import pwd
 import random
 import re
@@ -40,8 +39,9 @@ from dateutil.tz import tzlocal
 import numpy as np
 
 # Justin's personal scripts (from ~jll1062/mypy/bin)
-from genericUtils import (hrlist2list, list2hrlist, mkdir, chown_and_chmod,
-                          timediffstamp, timestamp, wstderr, wstdout)
+from genericUtils import (expand, hrlist2list, list2hrlist, mkdir,
+                          chown_and_chmod, timediffstamp, timestamp, wstderr,
+                          wstdout)
 from smartFormat import lowPrec
 
 
@@ -647,12 +647,12 @@ def parse_args(descr=__doc__):
 
     num_inspecs = 0
     if args.infile is not None:
-        args.infile = abspath(expandvars(expanduser(args.infile)))
+        args.infile = abspath(expand(args.infile))
         assert isfile(args.infile)
         num_inspecs += 1
 
     if args.indir is not None:
-        args.indir = abspath(expandvars(expanduser(args.indir)))
+        args.indir = abspath(expand(args.indir))
         assert isdir(args.indir)
         num_inspecs += 1
 
@@ -667,12 +667,12 @@ def parse_args(descr=__doc__):
         else:
             args.outdir = args.indir
     else:
-        args.outdir = abspath(expandvars(expanduser(args.outdir)))
+        args.outdir = abspath(expand(args.outdir))
 
     mkdir(args.outdir, warn=False)
     assert isdir(args.outdir)
 
-    args.gcd = expandvars(expanduser(args.gcd))
+    args.gcd = expand(args.gcd)
     assert isfile(args.gcd)
 
     if args.detector == 'pingu':
@@ -797,12 +797,10 @@ def main():
         lock_info['infile'] = infile_path
         lock_info['outfile'] = outfile_path
 
-        outfile_exists = False
         if isfile(outfile_path):
             wstdout('> Outfile path exists; will overwrite if both infile and'
                     ' outfile locks can be obtained! ...\n'
                     '>     "%s"\n' % outfile_path)
-            outfile_exists = True
 
         # NOTE:
         # Create lockfiles (if they don't exist) for each of the infile and
