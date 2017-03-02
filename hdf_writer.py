@@ -14,8 +14,7 @@ import os
 
 from numpy import loadtxt
 
-from I3Tray import I3Tray
-from icecube import *
+from I3Tray import *
 from icecube.tableio import I3TableWriter
 from icecube.hdfwriter import I3HDFTableService
 
@@ -63,94 +62,96 @@ def main():
             or args.outfile.lower().endswith('.h5')
             or args.outfile.lower().endswith('.hd5'))
 
-    #from icecube import icetray
+    from icecube import icetray
 
     # One or more of the following imports is actually necessary, but many may
     # not be necessary to convert files. Rather than try to figure out which is
     # which, all available imports (that don't fail) are included here.
 
-    #from icecube import multinest_icetray
+    from icecube import (
+        dataio,
+        tableio,
+        dataclasses,
+        simclasses,
+        dst,
+        millipede,
+        multinest_icetray,
+        gulliver_modules,
+        lilliput,
+        linefit,
+        hdfwriter,
+        improvedLinefit,
+        interfaces,
+        HiveSplitter,
+        cscd_llh,
+        IceHive,
+        spline_reco, # slow import!,
+        dipolefit,
+        paraboloid,
+        wavedeform,
+        common_variables,
+        gulliver,
+        phys_services,
+        wavereform, # slow import!
+        common_variables__direct_hits,
+        finiteReco,
+        payload_parsing,
+        clast,
+    )
 
+    from icecube import trigger_sim
     #from icecube import AtmCscdEnergyReco
-    #from icecube import gulliver_modules
-    ##from icecube import production_histograms
-    #from icecube import BadDomList
-    #from icecube import hdfwriter
-    #from icecube import pybdtmodule
-    #from icecube import CascadeVariables
-    #from icecube import icepick
-    ##from icecube import recclasses
-    #from icecube import CoincSuite
-    #from icecube import rootwriter
-    #from icecube import DeepCore_Filter
-    ##from icecube import core_removal
-    #from icecube import improvedLinefit
-    #from icecube import shield
-    #from icecube import DomTools
-    #from icecube import cramer_rao
-    #from icecube import interfaces
+    #from icecube import production_histograms
+    from icecube import BadDomList
+    from icecube import pybdtmodule
+    from icecube import CascadeVariables
+    from icecube import icepick
+    #from icecube import recclasses
+    from icecube import CoincSuite
+    from icecube import rootwriter
+    from icecube import DeepCore_Filter
+    #from icecube import core_removal
+    from icecube import shield
+    from icecube import DomTools
+    from icecube import cramer_rao
     #from icecube import shovelart
-    #from icecube import HiveSplitter
-    #from icecube import credo
-    #from icecube import ipdf
+    from icecube import credo
+    from icecube import ipdf
     #from icecube import shovelio
-    #from icecube import IceHive
-    #from icecube import cscd_llh
     #from icecube import level3_filter_cascade
-    #from icecube import simclasses
-    #from icecube import KalmanFilter
-    #from icecube import daq_decode
+    from icecube import KalmanFilter
+    from icecube import daq_decode
     #from icecube import level3_filter_lowen
-    #from icecube import spline_reco
-    #from icecube import NoiseEngine
-    #from icecube import dataclasses
+    from icecube import NoiseEngine
     #from icecube import level3_filter_muon
-    #from icecube import static_twc
-    #from icecube import SLOPtools
-    #from icecube import dataio
-    #from icecube import lilliput
-    #from icecube import steamshovel
-    #from icecube import STTools
-    #from icecube import dipolefit
-    #from icecube import linefit
-    #from icecube import tableio
+    from icecube import static_twc
+    from icecube import SLOPtools
+    from icecube import steamshovel
+    from icecube import STTools
     #from icecube import SeededRTCleaning
-    #from icecube import double_muon
-    #from icecube import load_pybindings
-    #from icecube import tensor_of_inertia
-    #from icecube import TopologicalSplitter
-    #from icecube import dst
-    #from icecube import millipede
+    from icecube import double_muon
+    from icecube import load_pybindings
+    from icecube import tensor_of_inertia
+    from icecube import TopologicalSplitter
     #from icecube import test_unregistered
-    #from icecube import VHESelfVeto
-    #from icecube import fill_ratio
+    from icecube import VHESelfVeto
+    from icecube import fill_ratio
     #from icecube import mue
     #from icecube import topeventcleaning
-    #from icecube import WaveCalibrator
-    #from icecube import filter_tools
+    from icecube import WaveCalibrator
+    from icecube import filter_tools
     #from icecube import ophelia
     #from icecube import toprec
     #from icecube import astro
     #from icecube import filterscripts
-    #from icecube import paraboloid
-    #from icecube import tpx
+    from icecube import tpx
     #from icecube import bayesian_priors
-    #from icecube import finiteReco
-    #from icecube import payload_parsing
-    #from icecube import trigger_sim
-    #from icecube import clast
     #from icecube import frame_object_diff
-    #from icecube import photonics_service
-    #from icecube import trigger_splitter
-    #from icecube import coinc_twc
+    from icecube import photonics_service
+    from icecube import trigger_splitter
+    from icecube import coinc_twc
     #from icecube import full_event_followup
-    #from icecube import photospline
-    #from icecube import wavedeform
-    #from icecube import common_variables
-    #from icecube import gulliver
-    #from icecube import phys_services
-    #from icecube import wavereform
-    #from icecube import common_variables__direct_hits
+    from icecube import photospline
     #from icecube import gulliver_bootstrap
     #from icecube import portia
 
@@ -172,7 +173,9 @@ def main():
     print '='*79
     print ''
 
-    mkdir(os.path.dirname(args.outfile), warn=False)
+    outdir = os.path.dirname(args.outfile)
+    if outdir not in ['', '.', './']:
+        mkdir(outdir, warn=False)
 
     tray = I3Tray()
     tray.AddModule('I3Reader', 'reader', filenamelist=args.infiles)
