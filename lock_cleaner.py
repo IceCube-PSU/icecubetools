@@ -24,15 +24,19 @@ from collections import OrderedDict
 from copy import deepcopy
 from multiprocessing import cpu_count, Manager, Pool
 from os import listdir, remove, rename
-from os.path import (abspath, expanduser, expandvars, getsize, isdir, isfile,
-                     join)
+from os.path import abspath, getsize, isdir, isfile, join
+import sys
 import time
+from traceback import format_exception
+
+# IceCube utils written by us
+from i3_utils import merge
 
 # Justin's personal scripts (from ~jll1062/mypy/bin)
-from genericUtils import nsort, timediffstamp, wstderr, wstdout
+from genericUtils import expand, nsort, timediffstamp, wstderr, wstdout
 from repeated_reco import (EXTENSION, FIT_FIELD_SUFFIX, LOCK_SUFFIX, RECO_RE,
-                           RECOS, acquire_lock, pathFromRecos, read_lockfile,
-                           recosFromPath)
+                           RECOS, cleanup_lock_f, acquire_lock, pathFromRecos,
+                           read_lockfile, recosFromPath)
 
 
 __all__ = ['CleanupRecoFiles', 'parse_args', 'main']
@@ -58,13 +62,111 @@ def get_recos(frame):
         references to the `RECO` constant defined in `repeated_reco.py`.
 
     """
+    from icecube import dataio
+    if isinstance(frame, basestring):
+        filepath = expand(frame)
+        try:
+            i3file = dataio.I3File(filepath)
+        except:
+            exc_str = ''.join(format_exception(*sys.exc_info()))
+            wstdout('ERROR! Could not open file "%s"\n%s\n'
+                    % (filepath, exc_str))
+            return []
+
+        try:
+            frame = i3file.pop_physics()
+        except:
+            exc_str = ''.join(format_exception(*sys.exc_info()))
+            wstdout('ERROR! Could not open file "%s"\n%s\n'
+                    % (filepath, exc_str))
+            return []
+        else:
+            i3file.close()
+
     keys = frame.keys()
     recos = []
     for reco_num, reco_info in enumerate(RECOS):
         reco_name = reco_info['name']
         if reco_name + FIT_FIELD_SUFFIX in keys:
             recos.append(reco_num)
+
     return sorted(recos)
+
+
+def merge_and_rename(files):
+    """Merge and/or rename all I3 files passed.
+
+    Parameters
+    ----------
+    files : sequence or iterable
+
+    Returns
+    -------
+    None if failure, or -- if success -- string containing path of generated
+    file
+
+    """
+    from icecube import dataio, icetray
+
+    if len(files) == 1:
+        filepath = files[0]
+        recos_in_file = get_recos(filepath)
+        new_path = pathFromRecos(orig_path=filepath, recos=recos_in_file)
+        if new_path == filepath:
+            return [filepath]
+
+        try:
+            rename(filepath, new_path)
+        except:
+            exc_str = ''.join(format_exception(*sys.exc_info()))
+            wstdout('ERROR! Could not move file from "%s" to "%s".\n%s\n'
+                    % (filepath, new_path, exc_str))
+            return None
+
+        return filepath
+
+    frames = merge(files)
+    for frame in frames:
+        if frame.Stop == icetray.I3Frame.Physics:
+            recos = get_recos(frame)
+
+    new_path = pathFromRecos(orig_path=expand(files[0]), recos=recos)
+    if isfile(new_path):
+        recos_in_existing_file = get_recos(new_path)
+        if set(recos_in_existing_file) != set(recos):
+            try:
+                remove(new_path)
+            except:
+                exc_str = ''.join(format_exception(*sys.exc_info()))
+                wstdout('ERROR! Could not remove file "%s".\n%s\n'
+                        % (new_path, exc_str))
+                return None
+
+            i3file = None
+            try:
+                i3file = dataio.I3File(new_path, 'w')
+                for frame in frames:
+                    i3file.push(frame)
+            except:
+                exc_str = ''.join(format_exception(*sys.exc_info()))
+                wstdout('ERROR! Could not write to file "%s".\n%s\n'
+                        % (new_path, exc_str))
+                return None
+            finally:
+                if i3file is not None:
+                    i3file.close()
+
+    for filepath in files:
+        if expand(filepath) == new_path:
+            continue
+        try:
+            remove(filepath)
+        except:
+            exc_str = ''.join(format_exception(*sys.exc_info()))
+            wstdout('ERROR! Could not remove file "%s".\n%s\n'
+                    % (filepath, exc_str))
+
+    return new_path
 
 
 class DeepCleaner(object):
@@ -96,7 +198,7 @@ class DeepCleaner(object):
         ret['failed_to_rename'] = self.failed_to_rename
         return ret
 
-    def _rename_or_remove(self, filepath, ignore_locks=False):
+    def _rename_or_remove(self, filepath):
         """Rename or remove an I3 file based on reconstructions found within
         the file. If there is a name conflict with an existing file,
         recursively resolve the conflict by checking the conflicting file, and
@@ -114,46 +216,87 @@ class DeepCleaner(object):
         """
         from icecube import dataio, icetray
 
-        wstderr('\n')
-        wstderr('    Working on "%s"\n' % filepath)
-
         if not filepath.endswith(EXTENSION):
             self._done_with(filepath)
             return 'kept'
 
         lockfilepath = filepath + LOCK_SUFFIX
-        created_lock = False
-        if isfile(lockfilepath):
-            lock_info = read_lockfile(lockfilepath)
-            if not ignore_locks and lock_info['expires_at'] <= time.time():
-                wstderr('        File is locked, skipping.\n')
+        lock_f = None
+
+        #
+        # Acquire lock file
+        #
+        lock_info = {'type': 'rename_or_remove'}
+        try:
+            lock_f = acquire_lock(lockfilepath, lock_info)
+        except IOError, err:
+            if err.errno == 11:
+                lock_info = read_lockfile(lockfilepath)
+                wstdout('File is locked, skipping: "%s"\n' % filepath)
                 self._done_with(lockfilepath)
                 return 'kept'
-        else:
-            with file(lockfilepath, 'w') as f:
-                f.write('')
-            created_lock = True
+            exc_str = ''.join(format_exception(*sys.exc_info()))
+            wstdout('ERROR! Trying to acquire lock on lockfile "%s"\n%s\n'
+                    % (lockfilepath, exc_str))
+            return 'kept'
+
+        except:
+            exc_str = ''.join(format_exception(*sys.exc_info()))
+            wstdout('ERROR! Trying to acquire lock on lockfile "%s"\n%s\n'
+                    % (lockfilepath, exc_str))
+            return 'kept'
+
+        #
+        # With lock file acquired, ...
+        #
         try:
             purportedly_run = set(recosFromPath(filepath))
-
             unique_recos_in_file = []
-            i3file = dataio.I3File(filepath)
+
+            #
+            # Open I3 file
+            #
             try:
+                i3file = dataio.I3File(filepath)
+            except:
+                exc_str = ''.join(format_exception(*sys.exc_info()))
+                wstdout('ERROR! Working with file "%s"\n%s\n'
+                        % (filepath, exc_str))
+                return 'kept'
+
+            #
+            # Work with I3 file...
+            #
+            try:
+                frame_num = 0
                 while i3file.more():
-                    frame = i3file.pop_frame()
+                    try:
+                        frame = i3file.pop_frame()
+                    except:
+                        exc_str = ''.join(format_exception(*sys.exc_info()))
+                        wstdout('ERROR! Could not pop frame %d in "%s"\n%s\n'
+                                % (frame_num, filepath, exc_str))
+                        return 'kept'
+                    else:
+                        frame_num += 1
+
                     if frame.Stop != icetray.I3Frame.Physics:
                         continue
                     frame_recos = get_recos(frame)
                     if frame_recos not in unique_recos_in_file:
                         unique_recos_in_file.append(set(frame_recos))
+
             finally:
                 i3file.close()
+
         finally:
-            if created_lock:
+            if lock_f is not None:
                 try:
                     remove(lockfilepath)
-                except (IOError, OSError):
-                    pass
+                except:
+                    exc_str = ''.join(format_exception(*sys.exc_info()))
+                    wstdout('ERROR! Could not remove lockfile "%s"\n%s\n'
+                            % (lockfilepath, exc_str))
 
         recos_run_on_all_events = set()
         if len(unique_recos_in_file) > 0:
@@ -238,7 +381,7 @@ class CleanupRecoFiles(object):
     def __init__(self, dirpath):
         self.dirpath = dirpath
         if isinstance(dirpath, basestring):
-            self.dirpath = abspath(expandvars(expanduser(dirpath)))
+            self.dirpath = abspath(expand(dirpath))
             assert isdir(self.dirpath)
             self.refresh_listing()
         else:
@@ -305,7 +448,6 @@ class CleanupRecoFiles(object):
             # valid. Once the set of runs done on 2017-02-22 completes, I think
             # this issue is fixed and so this sectoun should be re-introduced.
 
-            lock_info = read_lockfile(lockfilepath)
 
             ## 2. If lock file has outdated format, remove it
             ##    * Remove locked file if...?
@@ -335,18 +477,21 @@ class CleanupRecoFiles(object):
             # 5. If lock can be acquired on the file, then the lock has expired
             #    and therefore should be deleted.
             try:
-                acquire_lock(lockfilepath)
+                lock_f = acquire_lock(lockfilepath)
             except IOError, err:
+                # Could not acquire lock on file, since it is locked: OK
                 if err.errno == 11:
                     continue
-                raise
+                continue
             except:
-                raise
+                continue
             else:
                 # TODO: remove this clause once the buggy runs where lock files
                 # were being overwritten has been cleaned up
+                lock_info = read_lockfile(lockfilepath)
                 if 'type' in lock_info and lock_info['type'] == 'outfile_lock':
                     self._remove(lock_info['outfile'])
+                lock_f.close()
                 self._remove(lockfilepath)
 
         self.report()
@@ -383,7 +528,7 @@ class CleanupRecoFiles(object):
             groups[base].append(filepath)
         return groups
 
-    def deep_clean(self, n_procs=cpu_count()):
+    def deep_clean(self, n_procs=8*cpu_count()):
         """Run the cleaning process
 
         Parameters
@@ -414,9 +559,34 @@ class CleanupRecoFiles(object):
 
         wstderr(' '.join([str(len(g)) for g in groups]) + '\n')
 
+        # TODO: remove files that -- while not redundant -- have fewer recos
+        # (or, stretch goal: merge the non-redundant info together)
+
         self.report()
         wstdout('>     Time to run deep cleaning: %s\n'
                 % timediffstamp(time.time() - start_time))
+
+    def merge_and_rename(self, n_procs=cpu_count()):
+        """Merge and/or rename"""
+        start_time = time.time()
+        wstdout('> Merging and/or renaming I3 files in the directory...\n')
+        # Create a manager for objects synchronized across workers
+        mgr = Manager()
+        groups = [mgr.list(g) for g in self.group_by_event().values()]
+        pool = Pool(processes=n_procs)
+        ret = pool.map(merge_and_rename, groups)
+        successes = []
+        failures = 0
+        for r in ret:
+            if r is None:
+                failures += 1
+            else:
+                successes.append(r)
+        wstdout('> Failures: %5d; successes: %5d\n'
+                % (failures, len(successes)))
+        wstdout('>     Time to run merge_and_rename: %s\n'
+                % timediffstamp(time.time() - start_time, hms_always=True))
+        return failures, successes
 
     def report(self, kept=None, removed=None, renamed=None,
                failed_to_remove=None, failed_to_rename=None):
@@ -486,12 +656,12 @@ def parse_args(descr=__doc__):
         '--deep-clean', action='store_true',
         help='''Look inside I3 files and remove or rename if the recos are
         missing or incomplete as compared to those indicated by the
-        filename.'''
+        filename. Also, merge files that come from the same event.'''
     )
 
     args = parser.parse_args()
 
-    args.dir = abspath(expandvars(expanduser(args.dir)))
+    args.dir = abspath(expand(args.dir))
     assert isdir(args.dir)
 
     return args
@@ -509,7 +679,7 @@ def main():
     cleaner.cleanup_lockfiles()
 
     if args.deep_clean:
-        cleaner.deep_clean()
+        cleaner.merge_and_rename()
 
     #lock_count = 0
     #i3_count = 0
