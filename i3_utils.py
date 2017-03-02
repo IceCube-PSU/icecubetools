@@ -8,15 +8,22 @@ import copy
 import re
 import sys
 import textwrap
+from traceback import format_exception
 
 import numpy as np
 
-import genericUtils as GUTIL
+from genericUtils import wstderr, wstdout, expand, mkdir, findFiles
 
 try:
     from justinTSV import readJustinTSV
 except:
     pass
+
+
+__all__ = ['SOURCE_I3_RE', 'pushEventsCriteria', 'pushSelectEvents',
+           'pushEventsByCriteria', 'get_keys', 'countEvents', 'Split',
+           'merge', 'countEventsInAllI3Files', 'getEventPhysicsFrames',
+           'flattenFrameData', 'flattenFrame', 'passAllCuts']
 
 
 SOURCE_I3_RE = re.compile(r'(.*)\.(i3)(\.bz2){0,1}$', re.IGNORECASE)
@@ -133,16 +140,16 @@ def pushSelectEvents(inputI3, outputI3, eventsList, debug=False):
                 idx = eventIDs.index(header.event_id)
                 if skip == eventSkips[idx]:
                     storeFrame = True
-                    GUTIL.wstdout(
+                    wstdout(
                         '    * run_id=' + str(header.run_id) +
                         ' sub_run_id=' + str(header.sub_run_id) +
                         ' event_id=' + str(header.event_id) + '\n'
                     )
                 else:
-                    GUTIL.wstderr(
+                    wstderr(
                         'Skip mismatch! Skip specd:'
-                        + str(eventSkips[idx]) +
-                        ' but loop skip='+str(skip) + '\n'
+                        + str(eventSkips[idx])
+                        + ' but loop skip='+str(skip) + '\n'
                     )
                 eventIDs_remaining.remove(header.event_id)
 
@@ -220,12 +227,12 @@ def get_keys(i3fname):
     keys = set()
     try:
         while inputI3.more():
-            if frame.Stop not in [icetray.I3Frame.DAQ,
-                                  icetray.I3Frame.Physics]:
+            i3frame = inputI3.pop_frame()
+            if i3frame.Stop not in [icetray.I3Frame.DAQ,
+                                    icetray.I3Frame.Physics]:
                 continue
-            frame = inputI3.pop_frame()
-            keys = keys.union(frame.keys())
-        del frame
+            keys = keys.union(i3frame.keys())
+        del i3frame
     finally:
         inputI3.close()
 
@@ -285,13 +292,13 @@ class Split(object):
 
     """
     def __init__(self, infile, n_per_file=1, n_total=None, outdir=None):
-        self.infile_path = os.path.expandvars(os.path.expanduser(infile))
+        self.infile_path = expand(infile)
         self.n_per_file = n_per_file
         self.n_total = n_total if n_total is not None else np.inf
         self.outdir = outdir
         if self.outdir is None:
             self.outdir = os.path.dirname(self.infile_path)
-        GUTIL.mkdir(self.outdir, warn=False)
+        mkdir(self.outdir, warn=False)
         self.outfile = None
         self.event_number = -1
         self.frame_queue = []
@@ -362,6 +369,95 @@ class Split(object):
             self.outfile = None
 
 
+def merge(frames):
+    """Produce a sequence of 2 frames: The first Q frame encountered (if there
+    is one), and the merger of the P frames encountered.
+
+    If I3 file(s) are provided, the files are scanned until the first P frame
+    is encountered. The first Q frame encountered, if it is prior to the first
+    P frame, is used as the output Q frame if no previous Q frame has been
+    seen in the `frames` argument.
+
+    Parameters
+    ----------
+    frames : I3Frame, string path to i3 file, or sequence thereof
+
+    Returns
+    -------
+    merged_frames : list of I3Frame
+        If a Q frame was encountered, that is first in the list followed by the
+        merged P frame. If only P frames were encountered, just the merged P
+        frame will be in the `frames` list.
+
+    """
+    from icecube import dataio, icetray
+
+    if isinstance(frames, (basestring, icetray.I3Frame)):
+        frames = [frames]
+
+    q_frame = None
+    p_frame = None
+    for frame in frames:
+        if isinstance(frame, basestring):
+            i3file_path = expand(frame)
+            try:
+                i3file = dataio.I3File(i3file_path)
+            except:
+                exc_str = ''.join(format_exception(*sys.exc_info()))
+                wstdout('ERROR! Could not open file (moving on): "%s"\n%s\n'
+                        % (i3file_path, exc_str))
+                continue
+            try:
+                frame_num = 0
+                while i3file.more():
+                    try:
+                        frame = i3file.pop_frame()
+                    except:
+                        exc_str = ''.join(format_exception(*sys.exc_info()))
+                        wstdout(
+                            'ERROR! Could not pop frame %d from file "%s".'
+                            ' Moving on to next file.\n%s\n'
+                            % (frame_num, i3file_path, exc_str)
+                        )
+                        break
+                    else:
+                        frame_num += 1
+
+                    if frame.Stop == icetray.I3Frame.DAQ:
+                        if q_frame is None:
+                            q_frame = frame
+                    elif frame.Stop == icetray.I3Frame.Physics:
+                        if p_frame is None:
+                            p_frame = frame
+                        else:
+                            p_frame.merge(frame)
+                        break
+            except:
+                exc_str = ''.join(format_exception(*sys.exc_info()))
+                wstdout('ERROR! Failure working with file "%s"\n%s\n'
+                        % (i3file_path, exc_str))
+            finally:
+                i3file.close()
+
+        elif isinstance(frame, icetray.I3Frame):
+            if frame.Stop == icetray.I3Frame.DAQ:
+                if q_frame is None:
+                    q_frame = frame
+            elif frame.Stop == icetray.I3Frame.Physics:
+                if p_frame is None:
+                    p_frame = frame
+                else:
+                    p_frame.merge(frame)
+
+    merged_frames = []
+    if q_frame is not None:
+        merged_frames.append(q_frame)
+    if p_frame is not None:
+        merged_frames.append(p_frame)
+
+    return merged_frames
+
+
 def countEventsInAllI3Files(rootdir='.', recurse=False):
     """Count events (Q-frames) in all I3 files in a directory (and optionally
     recursing into sub-directories).
@@ -373,26 +469,26 @@ def countEventsInAllI3Files(rootdir='.', recurse=False):
 
     """
     digits = 12
-    f_iter = GUTIL.findFiles(
+    f_iter = findFiles(
         rootdir,
         regex=r'.*i3(\.tar){0,1}(\.bz2){0,1}',
         recurse=recurse
     )
     total_count = 0
     f_count = []
-    GUTIL.wstdout(('%'+str(digits)+'s   %s\n')
+    wstdout(('%'+str(digits)+'s   %s\n')
                   % ('Event count', 'File path'))
-    GUTIL.wstdout(('%'+str(digits)+'s   %s\n')
+    wstdout(('%'+str(digits)+'s   %s\n')
                   % ('-'*digits, '-'*(80-digits-3)))
 
     for f_path, _, _ in f_iter:
         count = countEvents(f_path)
         total_count += count
         f_count.append((f_path, count))
-        GUTIL.wstdout(('%'+str(digits)+'d   %s\n') % (count, f_path))
+        wstdout(('%'+str(digits)+'d   %s\n') % (count, f_path))
 
-    GUTIL.wstdout(('-'*digits+'\n'))
-    GUTIL.wstdout(
+    wstdout(('-'*digits+'\n'))
+    wstdout(
         ('%'+str(digits)+'s total DAQ (Q) frames contained in %d files\n')
         % (total_count, len(f_count))
     )
@@ -436,7 +532,7 @@ def getEventPhysicsFrames(i3fname, idx=0, debug=False):
 
                 if skip == idx:
                     storeFrame = True
-                    #GUTIL.wstdout('    * run_id=' + str(header.run_id) +
+                    #wstdout('    * run_id=' + str(header.run_id) +
                     #        ' sub_run_id=' + str(header.sub_run_id) +
                     #        ' event_id=' + str(header.event_id) + '\n')
             elif (frame.Stop == icetray.I3Frame.Physics) and storeFrame:
@@ -517,7 +613,7 @@ if __name__ == "__main__":
                    'outsideacc',
                    'outsideinac']
 
-    eventFilePaths = [os.path.join(os.path.expanduser('~'),
+    eventFilePaths = [os.path.join(expand('~'),
                                    'cowen',
                                    'quality_of_fit',
                                    'reports_archive',
@@ -526,7 +622,7 @@ if __name__ == "__main__":
                       for f in basenames]
 
     outputdir = os.path.join(
-        os.path.expanduser('~'),
+        expand('~'),
         'cowen',
         'data',
         'qof',
@@ -554,18 +650,18 @@ if __name__ == "__main__":
         source_i3path = os.path.join(outputdir, source_i3fname)
 
         # Display status to user
-        GUTIL.wstdout('# Processing events listed in\n')
-        GUTIL.wstdout('#   ' + path + '\n')
-        GUTIL.wstdout('#\n')
-        GUTIL.wstdout('# Output to\n')
-        GUTIL.wstdout('#   ' + source_i3path + '\n')
+        wstdout('# Processing events listed in\n')
+        wstdout('#   ' + path + '\n')
+        wstdout('#\n')
+        wstdout('# Output to\n')
+        wstdout('#   ' + source_i3path + '\n')
 
         source_i3f = dataio.I3File(source_i3path, 'w')
         try:
             for fname in fnames:
                 thisFileEvents = [event for event in eventsToProcess
                                   if event['srcfname'] == fname]
-                GUTIL.wstdout(
+                wstdout(
                     '\n... Extracting events '
                     + '\n'.join(textwrap.wrap(
                         ', '.join([str(e['eventid']) for e in thisFileEvents]),
@@ -583,4 +679,4 @@ if __name__ == "__main__":
                     break
         finally:
             source_i3f.close()
-        GUTIL.wstdout('\n')
+        wstdout('\n')
