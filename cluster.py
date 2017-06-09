@@ -215,7 +215,7 @@ def get_spline_tables():
 
     elif GROUP in ["PSU_ACI"]:
         cascade_spline_dir = "/cvmfs/icecube.opensciencegrid.org/data/photon-tables/splines"
-        track_spline_dir   = "/storage/group/dfc13_collab/spline_tables/muon_zero"
+        track_spline_dir   = "/gpfs/group/dfc13/default/spline_tables/muon_zero"
         photonics_dir      = "/cvmfs/icecube.opensciencegrid.org/data/photon-tables/SPICEMie/"
 
     elif GROUP in ["PSU_RCC"]:
@@ -225,6 +225,7 @@ def get_spline_tables():
         #photonics_dir      =
 
     else:
+        print 'unknown cluster group: %s' % GROUP
         # Use spline tables from CVMFS
         cascade_spline_dir = "/cvmfs/icecube.opensciencegrid.org/data/photon-tables/splines"
         track_spline_dir   = "/cvmfs/icecube.opensciencegrid.org/data/photon-tables/splines"

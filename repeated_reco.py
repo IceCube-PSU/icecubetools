@@ -14,12 +14,13 @@ HybridReco run with various MultiNest parameters for accuracy comparisons.
 # worker threads have to tell the sqlite db when they've completed processing a
 # file and that file is flagged as "done" and won't be re-processed
 
-from __future__ import division, print_function
+from __future__ import absolute_import, division, print_function
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from collections import Mapping, OrderedDict
 from copy import deepcopy
 from fcntl import flock, LOCK_EX, LOCK_NB
+from functools import partial
 import getpass
 from glob import glob
 import grp
@@ -48,7 +49,7 @@ from smartFormat import lowPrec
 __all__ = ['EXTENSION', 'LOCK_SUFFIX', 'LOCK_SEP', 'LOCK_FMT',
            'LOCK_ACQ_TIMEOUT', 'RECO_RE', 'NUM_LIVEPOINTS', 'GROUP', 'GID',
            'MODE',
-           'TOLERANCES', 'NUM_BASIC_RECO_TRIALS', 'FIT_FIELD_SUFFIX',
+           'TOLERANCES', 'FIT_FIELD_SUFFIX',
            'MN_DEFAULT_KW', 'RECOS', 'MIN_RECO_TIME',
            'getProcessInfo', 'EventCounter', 'constructRecoName',
            'recosFromPath', 'pathFromRecos', 'parse_args', 'main']
@@ -69,7 +70,7 @@ try:
     GID = grp.getgrnam(GROUP).gr_gid
 except KeyError:
     GID = pwd.getpwnam(getpass.getuser()).pw_gid
-MODE = 0666
+MODE = 0o666
 
 
 def getProcessInfo():
@@ -147,13 +148,15 @@ MN_DEFAULT_KW = dict(
 
 RECOS = []
 # High-resolution MultiNest runs
-for _numlive, _tol in product(NUM_LIVEPOINTS, TOLERANCES):
+HIRES_TRIALS = 1
+for _numlive, _tol, _trial in product(NUM_LIVEPOINTS, TOLERANCES, range(HIRES_TRIALS)):
     _time_limit = 60 * int(np.round(np.clip(
         _numlive*2/3 + 84,
         a_min=10,
         a_max=22*60
     )))
-    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol, trial=0)
+    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                   trial=_trial)
 
     _kwargs = deepcopy(MN_DEFAULT_KW)
     _kwargs['prefix'] = '%s_' % _reco_name
@@ -226,6 +229,25 @@ for _trial in range(20):
 MIN_RECO_TIME = min([r['time_limit'] for r in RECOS])
 
 
+def if_proto(frame, field_name):
+    """Skip processing frame if `field_name` is already in the frame.
+
+    Note that this must be used with `partial` to populate a value for
+    `field_name` and cannot be used directly as the value to the kwarg
+    If=... (`frame` is provided by the call from within icetray, but
+    `field_name` is not)
+
+    """
+    return not frame.Has(field_name)
+
+
+# Do not repeat a reconstruction already performed on a given event; the 'If'
+# function ensures this isn't done.
+for reco in RECOS:
+    if_func = partial(if_proto, field_name=reco['name'] + FIT_FIELD_SUFFIX)
+    reco['kwargs']['If'] = if_func
+
+
 def recosFromPath(filepath):
     """Parse filepath for recos (reported to have been) run on the file.
 
@@ -270,8 +292,7 @@ def pathFromRecos(orig_path, recos, ext=EXTENSION):
     # Strip the extension
     orig_path = orig_path[:-len(ext)]
 
-    # Construct a concise string which indicating recos run (or '' if no recos
-    # were run)
+    # Construct a concise string indicating recos run (or '' if none were run)
     if len(recos) > 0:
         reco_str = '_recos' + list2hrlist(sorted(recos))
     else:
@@ -392,10 +413,6 @@ def cleanup_lock_f(lock_f, force_remove=False):
     force_remove : bool
         Remove the lock file even if we don't hold a lock on it. WARNING! This
         is unsafe behavior in multi-threaded/multi-processing situations.
-
-    Returns
-    -------
-    None
 
     Raises
     ------
@@ -522,7 +539,7 @@ class FileLister(object):
     infile : string
         File to return (at most once).
     indir : string
-        Directory to search for un-locked files.
+        Directory to search for unlocked files.
 
     """
     def __init__(self, infile=None, indir=None):
@@ -532,12 +549,13 @@ class FileLister(object):
         if self.infile is not None:
             assert self.indir is None
             self.mode = 'infile'
+            self.files = [infile]
         elif self.indir is not None:
             self.mode = 'indir'
+            self.files = glob(join(self.indir, '*' + EXTENSION))
         else:
             raise ValueError('Either `infile` or `indir` must not be None.')
-        self.files = glob(join(self.indir, '*' + EXTENSION))
-        random.shuffle(self.files)
+        #random.shuffle(self.files)
         self.next_file = None
 
     def get_next_file(self):
@@ -577,13 +595,13 @@ def parse_args(descr=__doc__):
     parser.add_argument(
         '--infile',
         default=None,
-        help='''Path to the input file.'''
+        help='''Path to the input file. If specified, do not specify --indir'''
     )
     parser.add_argument(
         '--indir',
         default=None,
         help='''Path to the input directory, from which all I3 files will be
-        processed.'''
+        processed. If specified, to not specify --infile'''
     )
     parser.add_argument(
         '--gcd',
@@ -626,15 +644,22 @@ def parse_args(descr=__doc__):
         '--minutes-remaining',
         type=float, default=np.inf,
         help='''Minutes remaining in a job to run a reco; only those
-        reconstructions with time limits less than this will run.'''
+        reconstructions with time limits less than this will run. Specify <= 0
+        for no limit.'''
     )
     parser.add_argument(
         '--hours-remaining',
         type=float, default=np.inf,
         help='''Hours remaining in a job to run a reco; only those
-        reconstructions with time limits less than this will run.'''
+        reconstructions with time limits less than this will run. Specify <= 0
+        for no limit.'''
     )
-
+    parser.add_argument(
+        '--use-locks',
+        action='store_true',
+        help='''EXPERIMENTAL (and flaky): Use file locking to protect files
+        from being processed by multiple separate processes.'''
+    )
 
     args = parser.parse_args()
 
@@ -692,6 +717,9 @@ def parse_args(descr=__doc__):
             assert args.minutes_remaining == args.hours_remaining*60
         args.seconds_remaining = args.minutes_remaining * 60
 
+    if args.seconds_remaining <= 0:
+        args.seconds_remaining = np.inf
+
     return args
 
 
@@ -734,7 +762,14 @@ def main():
             wstdout('> No more files that can be processed. Quitting.\n')
             break
 
+        # NOTE: cannot run on a file that has _all_ recos already run, since
+        # output file cannot be same as input file (which it will have same
+        # name, since the name is derived from recos run / etc.)
+
+        # NOTE: remove the following line so that all recos are registered to
+        # be run, but skipping a reco is determined by the "If" kwarg.
         already_run = recosFromPath(infile_path)
+        #already_run = []
         recos_not_run_yet = sorted(set(args.requested) - set(already_run))
 
         if len(recos_not_run_yet) == 0:
@@ -812,7 +847,8 @@ def main():
         # as soon as the lock file is closed or when this process dies.
         lock_info['type'] = 'infile_lock'
         try:
-            infile_lock_f = acquire_lock(infile_lock_path, lock_info)
+            if args.use_locks:
+                infile_lock_f = acquire_lock(infile_lock_path, lock_info)
         except IOError:
             wstdout(
                 '> infile lock failed to be obtained.'
@@ -824,7 +860,8 @@ def main():
 
         lock_info['type'] = 'outfile_lock'
         try:
-            outfile_lock_f = acquire_lock(outfile_lock_path, lock_info)
+            if args.use_locks:
+                outfile_lock_f = acquire_lock(outfile_lock_path, lock_info)
         except IOError:
             wstdout(
                 'ERROR: outfile lock failed to be obtained.'
@@ -833,7 +870,8 @@ def main():
                 '    "%s" (outfile lock)\n'
                 % (infile_lock_path, outfile_lock_path)
             )
-            infile_lock_f = cleanup_lock_f(infile_lock_f)
+            cleanup_lock_f(infile_lock_f)
+            infile_lock_f = None
             continue
 
         try:
@@ -845,15 +883,17 @@ def main():
             # apparently cannot be overwritten
             if not (isinstance(err, OSError) and err.errno == 2):
                 wstdout(
-                    '> ERROR: obtained locks but outfile path exists and cannot be'
-                    ' removed. Cleaning up locks and moving on.\n'
+                    '> ERROR: obtained locks but outfile path exists and'
+                    ' cannot be removed. Cleaning up locks and moving on.\n'
                     '>     "%s" (outfile path)\n'
                     '>     "%s" (infile_lock_path)\n'
                     '>     "%s" (outfile_lock_path)\n'
                     % (outfile_path, infile_lock_path, outfile_lock_path)
                 )
-                infile_lock_f = cleanup_lock_f(infile_lock_f)
-                outfile_lock_f = cleanup_lock_f(outfile_lock_f)
+                cleanup_lock_f(infile_lock_f)
+                infile_lock_f = None
+                cleanup_lock_f(outfile_lock_f)
+                outfile_lock_f = None
                 continue
 
         try:
@@ -889,11 +929,6 @@ def main():
                 reco_name = RECOS[reco_num]['name']
                 time_limit = RECOS[reco_num]['time_limit']
                 kwargs = RECOS[reco_num]['kwargs']
-
-                # Do not repeat a reconstruction already performed on a given
-                # event; the 'If' function ensures this isn't done.
-                fit_field_name = reco_name + FIT_FIELD_SUFFIX
-                kwargs['If'] = lambda f: not f.Has(fit_field_name)
 
                 wstdout(
                     '> Setting up tray to run reco #%3d, %s (time limit %s)\n'
@@ -955,8 +990,10 @@ def main():
                         raise
 
         finally:
-            infile_lock_f = cleanup_lock_f(infile_lock_f)
-            outfile_lock_f = cleanup_lock_f(outfile_lock_f)
+            cleanup_lock_f(infile_lock_f)
+            infile_lock_f = None
+            cleanup_lock_f(outfile_lock_f)
+            outfile_lock_f = None
             del tray
 
         dt = time.time() - start_time_sec

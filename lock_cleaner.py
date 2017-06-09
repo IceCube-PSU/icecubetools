@@ -115,6 +115,9 @@ def merge_and_rename(files):
         if new_path == filepath:
             return [filepath]
 
+        if isfile(new_path):
+            wstdout('Warning! "%s" exists and will be overwritten when current'
+                    ' file "%s" is renamed.\n' % (filepath, new_path))
         try:
             rename(filepath, new_path)
         except:
@@ -125,6 +128,7 @@ def merge_and_rename(files):
 
         return filepath
 
+    # TODO: make sure recos are the same for all frames...
     frames = merge(files)
     for frame in frames:
         if frame.Stop == icetray.I3Frame.Physics:
@@ -134,6 +138,9 @@ def merge_and_rename(files):
     if isfile(new_path):
         recos_in_existing_file = get_recos(new_path)
         if set(recos_in_existing_file) != set(recos):
+            wstdout('Warning! "%s" exists, has different recos from than "%s",'
+                    ' and will be overwritten by the latter.\n'
+                    % (filepath, new_path))
             try:
                 remove(new_path)
             except:
