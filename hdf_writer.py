@@ -155,6 +155,18 @@ def main():
     #from icecube import gulliver_bootstrap
     #from icecube import portia
 
+    hasGENIE=True
+    try:
+        from ExtractGENIE import ExtractGENIESystematics
+        from ExtractGENIE import ExtractGENIEType
+        from ExtractGENIE import ExtractGENIEIterInfo
+        from ExtractGENIE import ExtractGENIEIterTarget
+    except:
+        print("Could not load GENIE extractors. Not doing any extraction!")
+        hasGENIE=False
+    
+    print "hasGENIE = ", hasGENIE
+
     if args.keys:
         keys = list(loadtxt(args.keys, dtype=str))
         book_everything = False
@@ -180,6 +192,43 @@ def main():
     tray = I3Tray()
     tray.AddModule('I3Reader', 'reader', filenamelist=args.infiles)
     hdf_service = I3HDFTableService(args.outfile)
+    ### GENIE info ####
+    if hasGENIE:
+        tray.AddModule(ExtractGENIEType       , "ExtractGENIEType_mod",
+                GENIEResultDict_Name = "I3GENIEResultDict",
+                Output_Name = "GENIE_InteractionType",
+                )
+    
+        tray.AddModule(ExtractGENIEIterInfo   , "ExtractGENIEIterInfo_mod",
+                GENIEResultDict_Name = "I3GENIEResultDict",
+                Output_Name = "GENIE_InteractionInfo",
+                )
+    
+        tray.AddModule(ExtractGENIEIterTarget , "ExtractGENIEIterTarget_mod",
+                GENIEResultDict_Name = "I3GENIEResultDict",
+                Output_Name = "GENIE_InteractionTarget",
+                )
+    
+        tray.AddModule(ExtractGENIESystematics, "ExtractGENIESystematics_mod",
+                GENIEResultDict_Name = "I3GENIEResultDict",
+                Output_Name = "GENIE_SystematicsReweight",
+                )
+    
+    def get_true_neutrino(frame):
+        i3mctree = frame['I3MCTree']
+        count = 0
+        for idx in range(0, len(i3mctree)):
+            i3particle = i3mctree[idx]
+            if i3particle.is_primary:
+                count += 1
+                if frame.Has('trueNeutrino'):
+                    del frame['trueNeutrino']
+                frame['trueNeutrino'] = i3particle
+            assert(count<=1)
+    
+    # only use this for where trueNeutrino needs to be rewritten 
+    #tray.AddModule(get_true_neutrino, "true_nu", Streams=[icetray.I3Frame.Physics])
+
     tray.AddModule(
         I3TableWriter, 'writer',
         tableservice=hdf_service,
