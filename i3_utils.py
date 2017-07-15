@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 
+"""
+Python utilities for working with IceCube (I3) files
+"""
 
-from __future__ import with_statement
+from __future__ import absolute_import, division, with_statement
 
-import os
 import copy
+import os
 import re
 import sys
 import textwrap
@@ -12,11 +15,11 @@ from traceback import format_exception
 
 import numpy as np
 
-from genericUtils import wstderr, wstdout, expand, mkdir, findFiles
+from genericUtils import findFiles
 
 try:
     from justinTSV import readJustinTSV
-except:
+except ImportError:
     pass
 
 
@@ -29,13 +32,45 @@ __all__ = ['SOURCE_I3_RE', 'pushEventsCriteria', 'pushSelectEvents',
 SOURCE_I3_RE = re.compile(r'(.*)\.(i3)(\.bz2){0,1}$', re.IGNORECASE)
 
 
-def pushEventsCriteria(inputI3, outputI3, criteria, debug=False):
+def wstdout(s):
+    """write and flush string `s` to stdout"""
+    sys.stdout.write(s)
+    sys.stdout.flush()
+
+
+def wstderr(s):
+    """write and flush string `s` to stderr"""
+    sys.stdout.write(s)
+    sys.stdout.flush()
+
+
+def mkdir(d, mode=0o750, warn=True):
+    """Make directory, recursively if parent directories do not exist."""
+    d = os.path.expandvars(os.path.expanduser(d))
+    if warn and os.path.isdir(d):
+        wstderr('Directory already exists: "%s"\n' % d)
+
+    try:
+        os.makedirs(os.path.expandvars(os.path.expanduser(d)), mode=mode)
+    except OSError as err:
+        if err.errno != 17:
+            raise err
+    else:
+        wstdout('Created directory: "%s"\n' % d)
+
+
+def expand(p):
+    """Shortcut to exapnd user dir ("~") and vars for a path."""
+    return os.path.expanduser(os.path.expandvars(p))
+
+
+def pushEventsCriteria(input_i3, output_i3, criteria, debug=False):
     """Grabs events meeting a certain criteria from input file and pushes them
     to the output file.
 
     Parameters
     ----------
-    inputI3, outputI3 : open dataio.I3File objects
+    input_i3, output_i3 : open dataio.I3File objects
 
     criteria : list of dicts
         List of dictionaries of the following format:
@@ -60,15 +95,15 @@ def pushEventsCriteria(inputI3, outputI3, criteria, debug=False):
     an event will be kept.
 
     """
-    from icecube import icetray
+    from icecube import icetray # pylint: disable=import-error
 
     if isinstance(criteria, dict):
         criteria = [criteria]
 
     skip = -1
     storeFrame = False
-    while inputI3.more():
-        frame = inputI3.pop_frame()
+    while input_i3.more():
+        frame = input_i3.pop_frame()
         if frame.Stop == icetray.I3Frame.DAQ:
             skip += 1
 
@@ -91,35 +126,35 @@ def pushEventsCriteria(inputI3, outputI3, criteria, debug=False):
 
         # Store whatever frame we're on, if the storeFrame flag is set...
         if storeFrame:
-            outputI3.push(frame)
+            output_i3.push(frame)
 
     del frame
 
 
-def pushSelectEvents(inputI3, outputI3, eventsList, debug=False):
+def pushSelectEvents(input_i3, output_i3, events_list, debug=False):
     """Grab events meeting a certain criteria from input file and push them to
     the output file.
 
     Parameters
     ----------
-    inputI3, outputI3 : open dataio.I3File objects (the latter in write mode)
-    eventsList : list of dicts
+    input_i3, output_i3 : open dataio.I3File objects (the latter in write mode)
+    events_list : list of dicts
         List of dictionaries with either 'skip', 'eventID', or both, to
         uniquely identify an event
     debug : bool
 
     """
-    from icecube import icetray
+    from icecube import icetray # pylint: disable=import-error
 
-    eventIDs = [event['eventid'] for event in eventsList]
-    eventSkips = [event['skip'] for event in eventsList]
+    eventIDs = [event['eventid'] for event in events_list]
+    eventSkips = [event['skip'] for event in events_list]
 
     eventIDs_remaining = copy.deepcopy(eventIDs)
 
     skip = -1
     storeFrame = False
-    while inputI3.more():
-        frame = inputI3.pop_frame()
+    while input_i3.more():
+        frame = input_i3.pop_frame()
         if frame.Stop == icetray.I3Frame.DAQ:
             skip += 1
 
@@ -128,7 +163,7 @@ def pushSelectEvents(inputI3, outputI3, eventsList, debug=False):
             storeFrame = False
 
             # If there are no remaining events to grab, might as well quit!
-            if len(eventIDs_remaining) == 0:
+            if not eventIDs_remaining:
                 break
 
             # Debug mode stops after first 50 Q frames
@@ -155,39 +190,39 @@ def pushSelectEvents(inputI3, outputI3, eventsList, debug=False):
 
         # Store whatever frame we're on, if the storeFrame flag is set...
         if storeFrame:
-            outputI3.push(frame)
+            output_i3.push(frame)
 
     del frame
 
 
-def pushEventsByCriteria(inputI3, outputI3, criteriaList):
+def pushEventsByCriteria(input_i3, output_i3, criteria_list):
     """Grab events from an input file and push those events (and all their
     associated P, Q, and other types of frames) that meet all specified
     criteria to the output file.
 
     Parameters
     ----------
-    inputI3, outputI3 : open dataio.I3File objects (the latter in write mode)
-    criteriaList : list of callables
+    input_i3, output_i3 : open dataio.I3File objects (the latter in write mode)
+    criteria_list : list of callables
         Each callable a function that operate on a frame, each of which returns
         True (to keep) or False (to throw away). *All* criteria must be met for
         *any one frame* in the sequence for the entire sequence to be written
         to the output I3 file.
 
     """
-    from icecube import icetray
+    from icecube import icetray # pylint: disable=import-error
 
     frameSequenceBuffer = []
     storeSequenceFlags = []
-    while inputI3.more():
-        frame = inputI3.pop_frame()
+    while input_i3.more():
+        frame = input_i3.pop_frame()
 
         if frame.Stop == icetray.I3Frame.DAQ:
             # Store old sequence to file if any of the physics frames in the
             # sequence matched all of the criteria
             if True in storeSequenceFlags:
                 for f in frameSequenceBuffer:
-                    outputI3.push(f)
+                    output_i3.push(f)
 
             # Reset the flags and clear the buffer, as a DAQ frame indicates
             # the start of a new sequence of frames that will all be associated
@@ -201,7 +236,7 @@ def pushEventsByCriteria(inputI3, outputI3, criteriaList):
         # Apply criteria only to physics frames
         if frame.Stop == icetray.I3Frame.Physics:
             storeFlag = True
-            for criteria in criteriaList:
+            for criteria in criteria_list:
                 storeFlag = storeFlag and criteria(frame)
             storeSequenceFlags.append(storeFlag)
 
@@ -220,21 +255,21 @@ def get_keys(i3fname):
         All unique keys from any frame in the file
 
     """
-    from icecube import dataio, icetray
+    from icecube import dataio, icetray # pylint: disable=import-error
 
-    inputI3 = dataio.I3File(i3fname, 'r')
+    input_i3 = dataio.I3File(i3fname, 'r')
 
     keys = set()
     try:
-        while inputI3.more():
-            i3frame = inputI3.pop_frame()
+        while input_i3.more():
+            i3frame = input_i3.pop_frame()
             if i3frame.Stop not in [icetray.I3Frame.DAQ,
                                     icetray.I3Frame.Physics]:
                 continue
             keys = keys.union(i3frame.keys())
         del i3frame
     finally:
-        inputI3.close()
+        input_i3.close()
 
     return sorted(keys)
 
@@ -248,13 +283,13 @@ def countEvents(i3fname, debug=False):
     debug : bool
 
     """
-    from icecube import dataio, icetray
+    from icecube import dataio, icetray # pylint: disable=import-error
 
-    inputI3 = dataio.I3File(i3fname, 'r')
+    input_i3 = dataio.I3File(i3fname, 'r')
     try:
         frameCount = 0
-        while inputI3.more():
-            frame = inputI3.pop_frame()
+        while input_i3.more():
+            frame = input_i3.pop_frame()
             if frame.Stop == icetray.I3Frame.DAQ:
                 frameCount += 1
                 #header = frame['I3EventHeader']
@@ -264,7 +299,7 @@ def countEvents(i3fname, debug=False):
                 break
         del frame
     finally:
-        inputI3.close()
+        input_i3.close()
 
     return frameCount
 
@@ -290,17 +325,32 @@ class Split(object):
         Directory into which to place the output files. If None, output
         directory is the same as the directory containing the input file.
 
+    keep_criteria : None or string
+        Criteria for choosing the event for splitting out; events that fail to
+        meet the criteria will not count towards n-total or n-per-file. The
+        variable `frame` is available to the keep_criteria, which is `eval`'ed
+        to yield whether to keep (True) the event or discard it (False)
+
     """
-    def __init__(self, infile, n_per_file=1, n_total=None, outdir=None):
+    def __init__(self, infile, n_per_file=1, n_total=None, outdir=None,
+                 keep_criteria=None):
         self.infile_path = expand(infile)
         self.n_per_file = n_per_file
         self.n_total = n_total if n_total is not None else np.inf
-        self.outdir = outdir
-        if self.outdir is None:
+        self.outdir = expand(outdir)
+        wstdout('outdir = "%s"\n' % self.outdir)
+        if self.outdir:
+            mkdir(self.outdir, warn=False)
+        else:
             self.outdir = os.path.dirname(self.infile_path)
+        self.keep_criteria = keep_criteria.strip()
+        if self.keep_criteria:
+            wstdout('Keep criteria:\n>>> %s\n' % self.keep_criteria)
         mkdir(self.outdir, warn=False)
-        self.outfile = None
         self.event_number = -1
+        self.all_event_number = -1
+        self.all_frame_number = -1
+        self.events_written = 0
         self.frame_queue = []
         self.finished = False
         self.outfilepath = None
@@ -310,63 +360,85 @@ class Split(object):
             basename, ext = os.path.splitext(basename)
             if ext.lower() == '.i3':
                 break
-        self.basename = basename
+        self.basename = os.path.basename(basename)
 
     def split(self):
         """Perform the splitting operation"""
-        from icecube import dataio, icetray
+        from icecube import dataclasses, dataio, icetray # pylint: disable=import-error
         if self.finished:
             raise Exception('Already performed operation.')
 
         infile = dataio.I3File(self.infile_path, 'r')
+        self.event_number = -1
+        self.all_event_number = -1
+        self.all_frame_number = -1
+        self.events_written = 0
         try:
             while infile.more():
                 frame = infile.pop_frame()
-                if frame.Stop == icetray.I3Frame.DAQ:
-                    sys.stdout.write('.')
-                    sys.stdout.flush()
+                self.all_frame_number += 1
+                stop = frame.Stop
+                if stop == icetray.I3Frame.DAQ:
+                    wstdout('q')
                     self._increment_event()
-                    if self.event_number >= self.n_total:
+                    if self.events_written >= self.n_total:
+                        wstderr('\nhit n_total\n')
                         break
-                    if self.outfile is None:
-                        quotient, _ = divmod(self.event_number,
-                                             self.n_per_file)
-                        self.outfilepath = os.path.join(
-                            self.outdir,
-                            '%s_split%d.i3.bz2' % (self.basename, quotient)
-                        )
-                        self.outfile = dataio.I3File(self.outfilepath, 'w')
                     self.frame_queue.append(frame)
-                elif frame.Stop == icetray.I3Frame.Physics:
-                    self.frame_queue.append(frame)
+                elif stop == icetray.I3Frame.Physics:
+                    keep = True
+                    if self.keep_criteria:
+                        keep = eval(self.keep_criteria) # pylint: disable=eval-used
+
+                    if keep:
+                        wstdout('p')
+                        self.frame_queue.append(frame)
+                    else:
+                        wstdout('x')
+                        last_frame = self.frame_queue[-1]
+                        if last_frame.Stop == icetray.I3Frame.DAQ:
+                            self.frame_queue.pop()
+                            self.event_number -= 1
+                else:
+                    wstdout('\nWARNING! Not keeping frame with Stop = "%s"\n'
+                            % stop)
         except Exception:
             raise
         else:
             self.finished = True
         finally:
             infile.close()
-            self._cleanup_outfile()
+            self._write_outfile()
 
     def _increment_event(self):
         self.event_number += 1
-        if self.event_number % self.n_per_file == 0:
-            self._cleanup_outfile()
+        self.all_event_number += 1
+        if (self.event_number > 0) and (self.event_number % self.n_per_file == 0):
+            self._write_outfile()
 
-    def _append_to_file(self):
-        if self.event_number < 0 or self.outfile is None:
+    def _write_outfile(self):
+        from icecube import dataio # pylint: disable=import-error
+
+        num_frames = len(self.frame_queue)
+        if num_frames == 0:
+            #wstderr('\nNo frames to write!\n')
             return
-
-        for _ in xrange(len(self.frame_queue)):
-            frame = self.frame_queue.pop(0)
-            self.outfile.push(frame)
-
-    def _cleanup_outfile(self):
-        self._append_to_file()
-        if self.outfile is not None:
-            sys.stdout.write('o')
-            sys.stdout.flush()
-            self.outfile.close()
-            self.outfile = None
+        self.events_written += self.n_per_file
+        quotient = (self.event_number - 1) // self.n_per_file
+        self.outfilepath = os.path.join(
+            self.outdir,
+            '%s_split%d.i3.bz2' % (self.basename, quotient)
+        )
+        #wstdout('\nWriting %d frames to %s\n' % (num_frames, self.outfilepath))
+        outfile = dataio.I3File(self.outfilepath, 'w')
+        try:
+            for _ in range(num_frames):
+                frame = self.frame_queue.pop(0)
+                outfile.push(frame)
+            wstdout('>')
+            #wstdout('%s\n' % self.outfilepath)
+        finally:
+            outfile.close()
 
 
 def merge(frames):
@@ -390,7 +462,7 @@ def merge(frames):
         frame will be in the `frames` list.
 
     """
-    from icecube import dataio, icetray
+    from icecube import dataio, icetray # pylint: disable=import-error
 
     if isinstance(frames, (basestring, icetray.I3Frame)):
         frames = [frames]
@@ -476,10 +548,8 @@ def countEventsInAllI3Files(rootdir='.', recurse=False):
     )
     total_count = 0
     f_count = []
-    wstdout(('%'+str(digits)+'s   %s\n')
-                  % ('Event count', 'File path'))
-    wstdout(('%'+str(digits)+'s   %s\n')
-                  % ('-'*digits, '-'*(80-digits-3)))
+    wstdout(('%'+str(digits)+'s   %s\n') % ('Event count', 'File path'))
+    wstdout(('%'+str(digits)+'s   %s\n') % ('-'*digits, '-'*(80-digits-3)))
 
     for f_path, _, _ in f_iter:
         count = countEvents(f_path)
@@ -505,15 +575,15 @@ def getEventPhysicsFrames(i3fname, idx=0, debug=False):
     debug : bool
 
     """
-    from icecube import dataio, icetray
+    from icecube import dataio, icetray # pylint: disable=import-error
 
     skip = -1
     keptFrames = []
     storeFrame = False
-    inputI3 = dataio.I3File(i3fname, 'r')
+    input_i3 = dataio.I3File(i3fname, 'r')
     try:
-        while inputI3.more():
-            frame = inputI3.pop_frame()
+        while input_i3.more():
+            frame = input_i3.pop_frame()
             if frame.Stop == icetray.I3Frame.DAQ:
                 skip += 1
 
@@ -539,12 +609,15 @@ def getEventPhysicsFrames(i3fname, idx=0, debug=False):
                 keptFrames.append(frame)
 
     finally:
-        inputI3.close()
+        input_i3.close()
 
     return keptFrames
 
 
-def flattenFrameData(node, key, datadic={}, prefix='', sep='_'):
+def flattenFrameData(node, key, datadic=None, prefix='', sep='_'):
+    if datadic is None:
+        datadic = {}
+
     if isinstance(key, str):
         datadic[prefix+sep+key] = node.__getattribute__(key)
 
@@ -563,9 +636,9 @@ def flattenFrameData(node, key, datadic={}, prefix='', sep='_'):
             )
 
 
-def flattenFrame(frame, keyDict, sep='_'):
+def flattenFrame(frame, key_dict, sep='_'):
     datadic = {}
-    for (key, subKeyList) in keyDict.iteritems():
+    for (key, subKeyList) in key_dict.iteritems():
         flattenFrameData(node=frame[key], key=subKeyList, datadic=datadic,
                          prefix=key, sep=sep)
         return datadic
@@ -594,8 +667,9 @@ def passAllCuts(frame): #, must_pass_step2=False):
     return False
 
 
-if __name__ == "__main__":
-    import dataio
+def main():
+    """main?"""
+    import dataio # pylint: disable=import-error
 
     debug = False
 
@@ -680,3 +754,7 @@ if __name__ == "__main__":
         finally:
             source_i3f.close()
         wstdout('\n')
+
+
+if __name__ == "__main__":
+    main()

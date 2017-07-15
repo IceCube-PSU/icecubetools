@@ -33,6 +33,7 @@ import random
 import re
 import signal
 import socket
+import sys
 import time
 
 from dateutil.parser import parse as date_parse
@@ -40,9 +41,8 @@ from dateutil.tz import tzlocal
 import numpy as np
 
 # Justin's personal scripts (from ~jll1062/mypy/bin)
-from genericUtils import (expand, hrlist2list, list2hrlist, mkdir,
-                          chown_and_chmod, timediffstamp, timestamp, wstderr,
-                          wstdout)
+from genericUtils import (expand, hrlist2list, list2hrlist, mkdir, chown_and_chmod,
+                          timediffstamp, timestamp, wstderr, wstdout)
 from smartFormat import lowPrec
 
 
@@ -54,6 +54,13 @@ __all__ = ['EXTENSION', 'LOCK_SUFFIX', 'LOCK_SEP', 'LOCK_FMT',
            'getProcessInfo', 'EventCounter', 'constructRecoName',
            'recosFromPath', 'pathFromRecos', 'parse_args', 'main']
 
+
+RECOS_VERSION = 2
+DRAGON_L5_CRITERIA = '''(
+    frame.Has('IC86_Dunkman_L3') and frame['IC86_Dunkman_L3']
+    and frame.Has('IC86_Dunkman_L4') and (frame['IC86_Dunkman_L4']['result'] == 1)
+    and frame.Has('IC86_Dunkman_L5') and (frame['IC86_Dunkman_L5']['bdt_score'] >= 0.2)
+)'''
 
 EXTENSION = '.i3.bz2'
 
@@ -74,6 +81,14 @@ MODE = 0o666
 
 
 def getProcessInfo():
+    """Get metadata bout the running process.
+
+    Returns
+    -------
+    info : dict
+        Keys are 'hostname', 'ip_address', 'pid', and 'user'
+
+    """
     info = OrderedDict()
     info['hostname'] = socket.gethostname()
     info['ip_address'] = socket.gethostbyname(info['hostname'])
@@ -118,9 +133,6 @@ def constructRecoName(dims, numlive, tol, trial):
     return reco_name
 
 
-NUM_LIVEPOINTS = [1000, 10000]
-TOLERANCES = [1e-2]
-
 FIT_FIELD_SUFFIX = '_FitParams'
 MN_CONFIG_PREFIX = 'MN_Full_'
 MN_DEFAULT_KW = dict(
@@ -147,104 +159,164 @@ MN_DEFAULT_KW = dict(
 )
 
 RECOS = []
-# High-resolution MultiNest runs
-HIRES_TRIALS = 1
-for _numlive, _tol, _trial in product(NUM_LIVEPOINTS, TOLERANCES, range(HIRES_TRIALS)):
-    _time_limit = 60 * int(np.round(np.clip(
-        _numlive*2/3 + 84,
-        a_min=10,
-        a_max=22*60
-    )))
-    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                   trial=_trial)
 
-    _kwargs = deepcopy(MN_DEFAULT_KW)
-    _kwargs['prefix'] = '%s_' % _reco_name
-    _kwargs['time_limit'] = _time_limit
-    _kwargs['numlive'] = _numlive
-    _kwargs['tol'] = _tol
-    RECOS.append(
-        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
-    )
-# "Standard" HybridReco settings from PINGU, re-run 10 times
-for _trial in range(10):
-    _numlive = 75
-    _tol = 1.1
-    _time_limit = 150 * 60
-    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                   trial=_trial)
-    _kwargs = deepcopy(MN_DEFAULT_KW)
-    _kwargs['prefix'] = '%s_' % _reco_name
-    _kwargs['time_limit'] = _time_limit
-    _kwargs['numlive'] = _numlive
-    _kwargs['tol'] = _tol
-    RECOS.append(
-        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
-    )
-# 50 livepoints, repeated 20 times
-for _trial in range(20):
-    _numlive = 50
-    _tol = 0.01
-    _time_limit = 100 * 60
-    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                   trial=_trial)
-    _kwargs = deepcopy(MN_DEFAULT_KW)
-    _kwargs['prefix'] = '%s_' % _reco_name
-    _kwargs['time_limit'] = _time_limit
-    _kwargs['numlive'] = _numlive
-    _kwargs['tol'] = _tol
-    RECOS.append(
-        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
-    )
-# 25 livepoints, repeated 20 times
-for _trial in range(20):
-    _numlive = 25
-    _tol = 0.01
-    _time_limit = 50 * 60
-    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                   trial=_trial)
-    _kwargs = deepcopy(MN_DEFAULT_KW)
-    _kwargs['prefix'] = '%s_' % _reco_name
-    _kwargs['time_limit'] = _time_limit
-    _kwargs['numlive'] = _numlive
-    _kwargs['tol'] = _tol
-    RECOS.append(
-        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
-    )
-# 10 livepoints, repeated 20 times
-for _trial in range(20):
-    _numlive = 10
-    _tol = 0.01
-    _time_limit = 30 * 60
-    _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                   trial=_trial)
-    _kwargs = deepcopy(MN_DEFAULT_KW)
-    _kwargs['prefix'] = '%s_' % _reco_name
-    _kwargs['time_limit'] = _time_limit
-    _kwargs['numlive'] = _numlive
-    _kwargs['tol'] = _tol
-    RECOS.append(
-        dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
-    )
+if RECOS_VERSION == 1:
+    NUM_LIVEPOINTS = [1000, 10000]
+    TOLERANCES = [1e-2]
+
+    # High-resolution MultiNest runs
+    HIRES_TRIALS = 1
+    TIME_LIMIT_FACTOR = 1000
+    for _numlive, _tol, _trial in product(NUM_LIVEPOINTS, TOLERANCES,
+                                          list(range(HIRES_TRIALS))):
+        _time_limit = 60 * int(np.round(np.clip(
+            _numlive*2/3 + 84,
+            a_min=10,
+            a_max=22*60
+        ))) * TIME_LIMIT_FACTOR
+        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                       trial=_trial)
+
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+    # "Standard" HybridReco settings from PINGU, re-run 10 times
+    for _trial in range(10):
+        _numlive = 75
+        _tol = 1.1
+        _time_limit = 150 * 60 * TIME_LIMIT_FACTOR
+        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                       trial=_trial)
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+    # 50 livepoints, repeated 20 times
+    for _trial in range(20):
+        _numlive = 50
+        _tol = 0.01
+        _time_limit = 100 * 60 * TIME_LIMIT_FACTOR
+        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                       trial=_trial)
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+    # 25 livepoints, repeated 20 times
+    for _trial in range(20):
+        _numlive = 25
+        _tol = 0.01
+        _time_limit = 50 * 60 * TIME_LIMIT_FACTOR
+        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                       trial=_trial)
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+    # 10 livepoints, repeated 20 times
+    for _trial in range(20):
+        _numlive = 10
+        _tol = 0.01
+        _time_limit = 30 * 60 * TIME_LIMIT_FACTOR
+        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                       trial=_trial)
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+
+elif RECOS_VERSION == 2:
+    NUM_LIVEPOINTS = [50, 75]
+    TOLERANCES = [1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1]
+    TRIALS = 10
+    _tr = list(range(TRIALS))
+    for _trial, _numlive, _tol in product(_tr, NUM_LIVEPOINTS, TOLERANCES):
+        _time_limit = 479 * 60 # 479 min = 7h 59min = 28740 sec
+        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
+                                       trial=_trial)
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+
+
 MIN_RECO_TIME = min([r['time_limit'] for r in RECOS])
 
 
-def if_proto(frame, field_name):
-    """Skip processing frame if `field_name` is already in the frame.
+def if_proto(frame, reco_base, eval_criteria=None):
+    """Prototype function that skips running an IceTray module or segment on a
+    frame if field_name = `reco_base` + FIT_FIELD_SUFFIX is already in the
+    frame.
 
-    Note that this must be used with `partial` to populate a value for
-    `field_name` and cannot be used directly as the value to the kwarg
-    If=... (`frame` is provided by the call from within icetray, but
-    `field_name` is not)
+    Note that this function must be used with `partial` to populate values for
+    `reco_base`; this function cannot be used directly as an argument to an
+    IceTray module's `If` kwarg (as only a single argument, `frame`, is
+    provided to that function by the IceTray)
 
     """
-    return not frame.Has(field_name)
+    from icecube import dataclasses, dataio, icetray, multinest_icetray # pylint: disable=unused-variable, import-error
+
+    field_name = reco_base + FIT_FIELD_SUFFIX
+
+    eval_result = True
+    if eval_criteria is not None:
+        eval_result = eval(eval_criteria) # pylint: disable=eval-used
+
+    if not eval_result:
+        sys.stdout.write('[NOT RUN] Not running reco %s (event did not pass'
+                         ' `eval_criteria`)\n' % field_name)
+        sys.stdout.flush()
+        return False
+
+    if not frame.Has(field_name):
+        sys.stdout.write('[RUN    ] Running missing reco %s\n' % field_name)
+        sys.stdout.flush()
+        return True
+
+    #if run_if_previous_timed_out and frame[field_name].has_reached_time_limit:
+    #    sys.stdout.write('[RUN    ] Running timed-out reco %s\n' % field_name)
+    #    sys.stdout.flush()
+    #    return True
+
+    sys.stdout.write('[NOT RUN] Not running reco %s\n' % field_name)
+    sys.stdout.flush()
+    return False
 
 
 # Do not repeat a reconstruction already performed on a given event; the 'If'
 # function ensures this isn't done.
 for reco in RECOS:
-    if_func = partial(if_proto, field_name=reco['name'] + FIT_FIELD_SUFFIX)
+    if_func = partial(
+        if_proto,
+        reco_base=reco['name'],
+        eval_criteria=DRAGON_L5_CRITERIA,
+        #run_if_previous_timed_out=True
+    )
     reco['kwargs']['If'] = if_func
 
 
@@ -293,7 +365,7 @@ def pathFromRecos(orig_path, recos, ext=EXTENSION):
     orig_path = orig_path[:-len(ext)]
 
     # Construct a concise string indicating recos run (or '' if none were run)
-    if len(recos) > 0:
+    if recos:
         reco_str = '_recos' + list2hrlist(sorted(recos))
     else:
         reco_str = ''
@@ -450,8 +522,8 @@ def cleanup_lock_f(lock_f, force_remove=False):
                 break
             try:
                 remove(lock_f.name)
-            except Exception, err:
-                if isinstance(err, OSError) and err.errno == 2:
+            except OSError, err:
+                if err.errno == 2:
                     removed = True
                     break
                 elif err.errno == 5:
@@ -499,7 +571,7 @@ class EventCounter(object):
         """Pass this method as an IceTray module."""
         if 'frame' in kwargs.keys():
             frame = kwargs['frame']
-        elif len(args) == 0:
+        elif not args:
             frame = None
         elif len(args) == 1:
             frame = args[0]
@@ -578,7 +650,7 @@ class FileLister(object):
         return self.next_file
 
     def _get_file_from_dir(self):
-        while len(self.files) > 0:
+        while self.files:
             f = self.files.pop()
             return f
         return None
@@ -604,6 +676,13 @@ def parse_args(descr=__doc__):
         processed. If specified, to not specify --infile'''
     )
     parser.add_argument(
+        '--outdir',
+        required=True,
+        help='''Output directory; must not be same as indir (or infile's
+        directory), as the source file may be corrupted or removed if an error
+        is encountered.''',
+    )
+    parser.add_argument(
         '--gcd',
         required=True,
         help='Path to GCD file',
@@ -615,17 +694,11 @@ def parse_args(descr=__doc__):
         frame containing the SRT_PULSE_NAME.''',
     )
     parser.add_argument(
-        '--n_events',
+        '--n-events',
         type=int, default=0,
-        help='''Total number of "events" to process (n_events <= 0 processes
+        help='''Total number of "events" to process (n-events <= 0 processes
         all events in the file(s) starting from from --skip). Note that an
         event is defined as a frame containing the SRT_PULSE_NAME.''',
-    )
-    parser.add_argument(
-        '--outdir',
-        default=None,
-        help='''Output directory; if not specified (None), output file is
-        placed in same directory as the first --infile path specified.''',
     )
     parser.add_argument(
         '--recos',
@@ -666,7 +739,7 @@ def parse_args(descr=__doc__):
     assert args.skip >= 0
 
     if args.recos == 'all':
-        args.requested = range(len(RECOS))
+        args.requested = list(range(len(RECOS)))
     else:
         args.requested = hrlist2list(args.recos)
 
@@ -686,13 +759,17 @@ def parse_args(descr=__doc__):
             'Either --infile or --indir must be specified but not both.'
         )
 
-    if args.outdir is None:
-        if args.infile is not None:
-            args.outdir = dirname(args.infile)
-        else:
-            args.outdir = args.indir
+    if args.infile is not None:
+        indir = abspath(dirname(expand(args.infile)))
     else:
-        args.outdir = abspath(expand(args.outdir))
+        indir = abspath(expand(args.indir))
+
+    args.outdir = abspath(expand(args.outdir))
+    if args.outdir == indir:
+        raise ValueError(
+            'Outdir cannot be same as indir (or if infile is specified,'
+            ' directory in which infile resides'
+        )
 
     mkdir(args.outdir, warn=False)
     assert isdir(args.outdir)
@@ -720,6 +797,9 @@ def parse_args(descr=__doc__):
     if args.seconds_remaining <= 0:
         args.seconds_remaining = np.inf
 
+    args.seconds_remaining = int(np.ceil(np.clip(args.seconds_remaining,
+                                                 a_min=0, a_max=31556926)))
+
     return args
 
 
@@ -728,15 +808,15 @@ def main():
     start_time_sec = time.time()
     args = parse_args()
 
-    def sigint_handler(signal, frame):
+    def _sigint_handler(signal, frame): # pylint: disable=unused-argument, redefined-outer-name
         wstderr('='*79 + '\n')
         wstderr('*** CAUGHT CTL-C (sigint) *** ... attempting to cleanup!\n')
         wstderr('='*79 + '\n')
         raise KeyboardInterrupt
 
     # Import IceCube things now
-    from I3Tray import I3Tray
-    from icecube import dataio, icetray, multinest_icetray
+    from I3Tray import I3Tray # pylint: disable=import-error
+    from icecube import dataclasses, dataio, icetray, multinest_icetray # pylint: disable=unused-variable, import-error
     from cluster import get_spline_tables
 
     lock_info = getProcessInfo()
@@ -766,13 +846,14 @@ def main():
         # output file cannot be same as input file (which it will have same
         # name, since the name is derived from recos run / etc.)
 
-        # NOTE: remove the following line so that all recos are registered to
-        # be run, but skipping a reco is determined by the "If" kwarg.
         already_run = recosFromPath(infile_path)
-        #already_run = []
-        recos_not_run_yet = sorted(set(args.requested) - set(already_run))
+        # NOTE: now skipping a reco is determined ONLY by the "If" kwarg, and
+        # not by the filename at all (swap the comment on the next line for the
+        # line below to change behavior back)
+        #recos_not_run_yet = sorted(set(args.requested) - set(already_run))
+        recos_not_run_yet = sorted(set(args.requested))
 
-        if len(recos_not_run_yet) == 0:
+        if not recos_not_run_yet:
             wstdout('> Nothing more to be done on file. Moving on. ("%s")\n'
                     % infile_path)
             continue
@@ -789,9 +870,16 @@ def main():
                     % infile_path)
             continue
 
-        time_remaining = np.ceil(
-            args.seconds_remaining - (time.time() - start_time_sec)
-        )
+        # NOTE: commenting out the following and forcing an extremely long
+        # timeout to allow all recos to run (of which many won't have to,
+        # becuase they've already been run). Uncomment the following three
+        # lines and comment out the "time_remaining =" line below to change the
+        # behavior back when most or all recos have to be run
+
+        #time_remaining = np.ceil(
+        #    args.seconds_remaining - (time.time() - start_time_sec)
+        #)
+        time_remaining = 3600 * 24 * 10000
 
         # See if any reco at all fits in the remaining time
         if time_remaining <= MIN_RECO_TIME:
@@ -814,7 +902,7 @@ def main():
         expiration = time.time() + time_to_run_processing + 60
         expiration_timestamp = timestamp(at=expiration, utc=True)
 
-        if len(recos_to_run) == 0:
+        if not recos_to_run:
             wstdout('Not enough time to run any remaining reco on file. Moving'
                     ' on. ("%s")\n' % infile_path)
             continue
@@ -823,9 +911,22 @@ def main():
         infile_lock_path = infile_path + LOCK_SUFFIX
         outfile_lock_path = None
         allrecos = set(recos_to_run).union(already_run)
-        outfile_name = pathFromRecos(orig_path=infile_path, recos=allrecos)
-        outfile_path = join(args.outdir, outfile_name)
+        outfile_name = basename(pathFromRecos(orig_path=infile_path, recos=allrecos))
+        outfile_path = abspath(expand(join(args.outdir, outfile_name)))
+
+        #print('args.outdir: "%s", outfile_name: "%s", outfile_path: "%s"'
+        #      % (args.outdir, outfile_name, outfile_path))
+        #break # debug
+
         outfile_lock_path = outfile_path + LOCK_SUFFIX
+
+        if outfile_name == infile_path or outfile_path == infile_path:
+            wstdout(
+                'Outfile is same as infile, which will lead to removal of'
+                ' infile. Path = "%s" ; Moving on to next input file.\n'
+                % infile_path
+            )
+            continue
 
         lock_info['acquired_at'] = timestamp(utc=True)
         lock_info['expires_at'] = expiration_timestamp
@@ -876,12 +977,12 @@ def main():
 
         try:
             remove(outfile_path)
-        except Exception, err:
+        except OSError, err:
             # OSError.errno == 2 => "No such file or directory", which is OK
             # since the point of `remove` is to make sure the path doesn't
             # exist; otherwise, we can't go on since the output file exists but
             # apparently cannot be overwritten
-            if not (isinstance(err, OSError) and err.errno == 2):
+            if err.errno != 2:
                 wstdout(
                     '> ERROR: obtained locks but outfile path exists and'
                     ' cannot be removed. Cleaning up locks and moving on.\n'
@@ -895,6 +996,12 @@ def main():
                 cleanup_lock_f(outfile_lock_f)
                 outfile_lock_f = None
                 continue
+        except Exception:
+            cleanup_lock_f(infile_lock_f)
+            infile_lock_f = None
+            cleanup_lock_f(outfile_lock_f)
+            outfile_lock_f = None
+            raise
 
         try:
             tray = I3Tray()
@@ -964,7 +1071,7 @@ def main():
             )
             wstdout('> ' + '-'*77 + '\n')
 
-            signal.signal(signal.SIGINT, sigint_handler)
+            signal.signal(signal.SIGINT, _sigint_handler)
 
             try:
                 tray.Execute()

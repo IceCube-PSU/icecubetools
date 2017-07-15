@@ -1,5 +1,6 @@
 #!/bin/sh /cvmfs/icecube.opensciencegrid.org/py2-v1/icetray-start
 #METAPROJECT /storage/home/jll1062/build/pingusoft/trunk
+
 """
 Clean I3 files and lockfiles left behind by reconstruction
 """
@@ -17,14 +18,14 @@ Clean I3 files and lockfiles left behind by reconstruction
 # esp. ctl-c (SIG_INT), so that cleanup can occur even though IceCube software
 # is trying to kill the process instead of raising the exception
 
-from __future__ import division, print_function
+from __future__ import absolute_import, division, print_function
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from collections import OrderedDict
+from collections import Iterable, OrderedDict
 from copy import deepcopy
 from multiprocessing import cpu_count, Manager, Pool
 from os import listdir, remove, rename
-from os.path import abspath, getsize, isdir, isfile, join
+from os.path import abspath, dirname, getsize, isdir, isfile, join
 import sys
 import time
 from traceback import format_exception
@@ -35,8 +36,8 @@ from i3_utils import merge
 # Justin's personal scripts (from ~jll1062/mypy/bin)
 from genericUtils import expand, nsort, timediffstamp, wstderr, wstdout
 from repeated_reco import (EXTENSION, FIT_FIELD_SUFFIX, LOCK_SUFFIX, RECO_RE,
-                           RECOS, cleanup_lock_f, acquire_lock, pathFromRecos,
-                           read_lockfile, recosFromPath)
+                           RECOS, acquire_lock, pathFromRecos, read_lockfile,
+                           recosFromPath)
 
 
 __all__ = ['CleanupRecoFiles', 'parse_args', 'main']
@@ -62,7 +63,7 @@ def get_recos(frame):
         references to the `RECO` constant defined in `repeated_reco.py`.
 
     """
-    from icecube import dataio
+    from icecube import dataio, multinest_icetray
     if isinstance(frame, basestring):
         filepath = expand(frame)
         try:
@@ -77,7 +78,7 @@ def get_recos(frame):
             frame = i3file.pop_physics()
         except:
             exc_str = ''.join(format_exception(*sys.exc_info()))
-            wstdout('ERROR! Could not open file "%s"\n%s\n'
+            wstdout('ERROR! Could not find P frame in file "%s"\n%s\n'
                     % (filepath, exc_str))
             return []
         else:
@@ -86,8 +87,9 @@ def get_recos(frame):
     keys = frame.keys()
     recos = []
     for reco_num, reco_info in enumerate(RECOS):
-        reco_name = reco_info['name']
-        if reco_name + FIT_FIELD_SUFFIX in keys:
+        field_name = reco_info['name'] + FIT_FIELD_SUFFIX
+        #if field_name in keys and not frame[field_name].has_reached_time_limit:
+        if field_name in keys:
             recos.append(reco_num)
 
     return sorted(recos)
@@ -391,8 +393,16 @@ class CleanupRecoFiles(object):
             self.dirpath = abspath(expand(dirpath))
             assert isdir(self.dirpath)
             self.refresh_listing()
+        elif isinstance(dirpath, Iterable):
+            self._allfilepaths = []
+            for filepath in dirpath:
+                if not isinstance(filepath, basestring):
+                    raise ValueError('each item must be a string')
+                if not isfile(filepath):
+                    raise ValueError('path "%s" is not a file!' % filepath)
+                self._allfilepaths.append(filepath)
         else:
-            raise ValueError('`dirpath` must be a string')
+            raise ValueError('`dirpath` must be a string or iterable thereof')
 
         self.removed = []
         self.renamed = []
@@ -535,7 +545,7 @@ class CleanupRecoFiles(object):
             groups[base].append(filepath)
         return groups
 
-    def deep_clean(self, n_procs=8*cpu_count()):
+    def deep_clean(self, n_procs=None):
         """Run the cleaning process
 
         Parameters
@@ -547,6 +557,9 @@ class CleanupRecoFiles(object):
         """
         start_time = time.time()
         wstdout('> Deep-cleaning the I3 files in the directory...\n')
+
+        if n_procs is None:
+            n_procs = min(len(self._allfilepaths), 8*cpu_count())
 
         # Create a manager for objects synchronized across workers
         mgr = Manager()
@@ -573,8 +586,10 @@ class CleanupRecoFiles(object):
         wstdout('>     Time to run deep cleaning: %s\n'
                 % timediffstamp(time.time() - start_time))
 
-    def merge_and_rename(self, n_procs=cpu_count()):
+    def merge_and_rename(self, n_procs=None):
         """Merge and/or rename"""
+        if n_procs is None:
+            n_procs = min(len(self._allfilepaths), 8*cpu_count())
         start_time = time.time()
         wstdout('> Merging and/or renaming I3 files in the directory...\n')
         # Create a manager for objects synchronized across workers
@@ -652,8 +667,12 @@ def parse_args(descr=__doc__):
     )
 
     parser.add_argument(
-        '-d', '--dir',
+        '-d', '--dir', default=None,
         help='''Directory in which to find the files for cleaning.'''
+    )
+    parser.add_argument(
+        '-f', '--file', default=None,
+        help='''Single file to clean.'''
     )
     parser.add_argument(
         '--remove-empty', action='store_true',
@@ -668,9 +687,16 @@ def parse_args(descr=__doc__):
 
     args = parser.parse_args()
 
-    args.dir = abspath(expand(args.dir))
-    assert isdir(args.dir)
-
+    if args.dir:
+        assert not args.file
+        args.dir = abspath(expand(args.dir))
+        assert isdir(args.dir)
+    else:
+        args.file = abspath(expand(args.file))
+        assert isfile(args.file)
+        # CleanupRecoFiles takes a list of strings to be list of filenames, so
+        # just replace args.dir with list containing this one filename
+        args.dir = [args.file]
     return args
 
 
@@ -679,7 +705,7 @@ def main():
     start_time_sec = time.time()
     args = parse_args()
 
-    cleaner = CleanupRecoFiles(dirpath=args.dir)
+    cleaner = CleanupRecoFiles(args.dir)
     if args.remove_empty:
         cleaner.remove_empty_files()
 
