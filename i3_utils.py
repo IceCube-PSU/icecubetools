@@ -338,13 +338,14 @@ class Split(object):
         self.n_per_file = n_per_file
         self.n_total = n_total if n_total is not None else np.inf
         self.outdir = expand(outdir)
+        self.keep_criteria = keep_criteria
         wstdout('outdir = "%s"\n' % self.outdir)
         if self.outdir:
             mkdir(self.outdir, warn=False)
         else:
             self.outdir = os.path.dirname(self.infile_path)
-        self.keep_criteria = keep_criteria.strip()
         if self.keep_criteria:
+            self.keep_criteria = keep_criteria.strip()
             wstdout('Keep criteria:\n>>> %s\n' % self.keep_criteria)
         mkdir(self.outdir, warn=False)
         self.event_number = -1
