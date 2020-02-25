@@ -111,7 +111,7 @@ def getclustername_tracepath():
 
 def _write_host_to_cache(host):
     try:
-        with file(CACHEFILE_NAME, 'w') as cachefile:
+        with open(CACHEFILE_NAME, 'w', encoding='UTF-8') as cachefile:
             cachefile.write(host + '\n')
     except (IOError, OSError):
         pass
@@ -125,14 +125,14 @@ def getclustername():
     # 1. socket
     host = socket.gethostname()
     host_lower = host.lower()
-    if any([(s.lower() in host_lower) for s in HOST_TO_GROUP_MAPPING.keys()]):
+    if any((s.lower() in host_lower) for s in HOST_TO_GROUP_MAPPING):
         return host
 
     # Move on to slower methods next...
 
     # 2. non-trivial string in the cache file
     if os.path.isfile(CACHEFILE_NAME):
-        with file(CACHEFILE_NAME, 'r') as cachefile:
+        with open(CACHEFILE_NAME, 'r', encoding='UTF-8') as cachefile:
             host = str(cachefile.readline()).strip()
         if len(host) > 0:
             return host
@@ -140,7 +140,7 @@ def getclustername():
     # 3. dig
     try:
         host = getclustername_dig()
-    except:
+    except Exception:
         pass
     else:
         _write_host_to_cache(host)
@@ -149,7 +149,7 @@ def getclustername():
     # 4. tracepath
     try:
         host = getclustername_tracepath()
-    except:
+    except Exception:
         pass
     else:
         _write_host_to_cache(host)
@@ -158,7 +158,7 @@ def getclustername():
     # 5. whois
     try:
         host = getclustername_whois()
-    except:
+    except Exception:
         pass
     else:
         _write_host_to_cache(host)
@@ -225,7 +225,7 @@ def get_spline_tables():
         #photonics_dir      =
 
     else:
-        print 'unknown cluster group: %s' % GROUP
+        print('unknown cluster group: %s' % GROUP)
         # Use spline tables from CVMFS
         cascade_spline_dir = "/cvmfs/icecube.opensciencegrid.org/data/photon-tables/splines"
         track_spline_dir   = "/cvmfs/icecube.opensciencegrid.org/data/photon-tables/splines"
@@ -325,5 +325,5 @@ if __name__ == '__main__':
         print("=====================")
         print("Spline tables:")
         tables = get_spline_tables()
-        for key in tables.keys():
+        for key in tables:
             print(" %15s => %s" % (key, tables[key]))
