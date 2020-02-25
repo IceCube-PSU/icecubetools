@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 
-from __future__ import with_statement
+from __future__ import absolute_import, print_function, with_statement
 
 import argparse
 import os
@@ -111,7 +111,7 @@ def getclustername_tracepath():
 
 def _write_host_to_cache(host):
     try:
-        with open(CACHEFILE_NAME, 'w', encoding='UTF-8') as cachefile:
+        with open(CACHEFILE_NAME.encode('utf8'), 'w') as cachefile:
             cachefile.write(host + '\n')
     except (IOError, OSError):
         pass
@@ -132,7 +132,7 @@ def getclustername():
 
     # 2. non-trivial string in the cache file
     if os.path.isfile(CACHEFILE_NAME):
-        with open(CACHEFILE_NAME, 'r', encoding='UTF-8') as cachefile:
+        with open(CACHEFILE_NAME, 'r') as cachefile:
             host = str(cachefile.readline()).strip()
         if len(host) > 0:
             return host
@@ -257,7 +257,7 @@ def get_folder_name(step):
         folder = os.path.expandvars("$HOME/stock/I3Files/pingu")
     else:
         folder = os.path.expandvars("$HOME/pingu")
-    folder  = folder + ("/pingu-std-proc_Step%s" % step)
+    folder = folder + ("/pingu-std-proc_Step%s" % step)
 
     return folder
 
@@ -284,19 +284,19 @@ if __name__ == '__main__':
     gl_parser = argparse.ArgumentParser(description="Cluster discovery tool.")
     parser = gl_parser.add_mutually_exclusive_group()
     parser.add_argument(
-        "--whereami" ,
+        "--whereami",
         action="store_true",
-        help = "Simplified host/group printing"
+        help="Simplified host/group printing"
     )
     parser.add_argument(
         "--debug",
         action="store_true",
-        help = "Print all information that can be discovered with python calls"
+        help="Print all information that can be discovered with python calls"
     )
     parser.add_argument(
         "--gcd",
         action="store_true",
-        help = "return path for GCD files"
+        help="return path for GCD files"
     )
     parser.add_argument(
         "--step",
