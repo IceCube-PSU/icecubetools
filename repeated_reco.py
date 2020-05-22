@@ -51,11 +51,11 @@ __all__ = ['EXTENSION', 'LOCK_SUFFIX', 'LOCK_SEP', 'LOCK_FMT',
            'MODE',
            'TOLERANCES', 'FIT_FIELD_SUFFIX',
            'MN_DEFAULT_KW', 'RECOS', 'MIN_RECO_TIME',
-           'getProcessInfo', 'EventCounter', 'constructRecoName',
-           'recosFromPath', 'pathFromRecos', 'parse_args', 'main']
+           'get_process_info', 'EventCounter', 'construct_reco_name',
+           'recos_from_path', 'path_from_recos', 'parse_args', 'main']
 
 
-RECOS_VERSION = 2
+RECOS_SET = 2
 DRAGON_L5_CRITERIA = '''(
     frame.Has('IC86_Dunkman_L3') and frame['IC86_Dunkman_L3']
     and frame.Has('IC86_Dunkman_L4') and (frame['IC86_Dunkman_L4']['result'] == 1)
@@ -80,7 +80,7 @@ except KeyError:
 MODE = 0o666
 
 
-def getProcessInfo():
+def get_process_info():
     """Get metadata bout the running process.
 
     Returns
@@ -101,7 +101,7 @@ def getProcessInfo():
     return info
 
 
-def constructRecoName(dims, numlive, tol, trial):
+def construct_reco_name(dims, numlive, tol, trial):
     """Construct a canonical name for the HybridReco/MultiNest reconstruction
     defined by a few particular parameters that MultiNest takes.
 
@@ -160,7 +160,7 @@ MN_DEFAULT_KW = dict(
 
 RECOS = []
 
-if RECOS_VERSION == 1:
+if RECOS_SET == 1:
     NUM_LIVEPOINTS = [1000, 10000]
     TOLERANCES = [1e-2]
 
@@ -174,8 +174,8 @@ if RECOS_VERSION == 1:
             a_min=10,
             a_max=22*60
         ))) * TIME_LIMIT_FACTOR
-        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                       trial=_trial)
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
 
         _kwargs = deepcopy(MN_DEFAULT_KW)
         _kwargs['prefix'] = '%s_' % _reco_name
@@ -190,8 +190,8 @@ if RECOS_VERSION == 1:
         _numlive = 75
         _tol = 1.1
         _time_limit = 150 * 60 * TIME_LIMIT_FACTOR
-        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                       trial=_trial)
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
         _kwargs = deepcopy(MN_DEFAULT_KW)
         _kwargs['prefix'] = '%s_' % _reco_name
         _kwargs['time_limit'] = _time_limit
@@ -205,8 +205,8 @@ if RECOS_VERSION == 1:
         _numlive = 50
         _tol = 0.01
         _time_limit = 100 * 60 * TIME_LIMIT_FACTOR
-        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                       trial=_trial)
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
         _kwargs = deepcopy(MN_DEFAULT_KW)
         _kwargs['prefix'] = '%s_' % _reco_name
         _kwargs['time_limit'] = _time_limit
@@ -220,8 +220,8 @@ if RECOS_VERSION == 1:
         _numlive = 25
         _tol = 0.01
         _time_limit = 50 * 60 * TIME_LIMIT_FACTOR
-        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                       trial=_trial)
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
         _kwargs = deepcopy(MN_DEFAULT_KW)
         _kwargs['prefix'] = '%s_' % _reco_name
         _kwargs['time_limit'] = _time_limit
@@ -235,8 +235,8 @@ if RECOS_VERSION == 1:
         _numlive = 10
         _tol = 0.01
         _time_limit = 30 * 60 * TIME_LIMIT_FACTOR
-        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                       trial=_trial)
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
         _kwargs = deepcopy(MN_DEFAULT_KW)
         _kwargs['prefix'] = '%s_' % _reco_name
         _kwargs['time_limit'] = _time_limit
@@ -246,15 +246,57 @@ if RECOS_VERSION == 1:
             dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
         )
 
-elif RECOS_VERSION == 2:
+elif RECOS_SET == 2:
     NUM_LIVEPOINTS = [50, 75]
     TOLERANCES = [1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1]
-    TRIALS = 10
+    TRIALS = 1
     _tr = list(range(TRIALS))
     for _trial, _numlive, _tol in product(_tr, NUM_LIVEPOINTS, TOLERANCES):
         _time_limit = 479 * 60 # 479 min = 7h 59min = 28740 sec
-        _reco_name = constructRecoName(dims=8, numlive=_numlive, tol=_tol,
-                                       trial=_trial)
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+
+    # We should run multiple recos with nlive={50, 75} and
+    # tol={1e-3, 1e-2, 1e-1} and also run a bunch of nlive=25 with
+    # tol={1e-3, 1e-2, 1e-1} repeated versions of the above (recos 12 on) and
+    # attach these instead
+    RECOS = RECOS[:12]
+
+    NUM_LIVEPOINTS = [25]
+    TOLERANCES = [1e-3, 1e-2, 1e-1]
+    TRIALS = 1
+    _tr = list(range(TRIALS))
+    for _trial, _numlive, _tol in product(_tr, NUM_LIVEPOINTS, TOLERANCES):
+        _time_limit = 479 * 60 # 479 min = 7h 59min = 28740 sec
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
+        _kwargs = deepcopy(MN_DEFAULT_KW)
+        _kwargs['prefix'] = '%s_' % _reco_name
+        _kwargs['time_limit'] = _time_limit
+        _kwargs['numlive'] = _numlive
+        _kwargs['tol'] = _tol
+        RECOS.append(
+            dict(name=_reco_name, time_limit=_time_limit, kwargs=_kwargs)
+        )
+
+    NUM_LIVEPOINTS = [25, 50, 75]
+    TOLERANCES = [1e-3, 1e-2, 1e-1]
+    # By now we've already done one trial of each (trial0), so do 9 more and
+    # start here with trial1
+    TRIALS = 9
+    _tr = list(range(1, 1 + TRIALS))
+    for _trial, _numlive, _tol in product(_tr, NUM_LIVEPOINTS, TOLERANCES):
+        _time_limit = 479 * 60 # 479 min = 7h 59min = 28740 sec
+        _reco_name = construct_reco_name(dims=8, numlive=_numlive, tol=_tol,
+                                         trial=_trial)
         _kwargs = deepcopy(MN_DEFAULT_KW)
         _kwargs['prefix'] = '%s_' % _reco_name
         _kwargs['time_limit'] = _time_limit
@@ -320,7 +362,7 @@ for reco in RECOS:
     reco['kwargs']['If'] = if_func
 
 
-def recosFromPath(filepath):
+def recos_from_path(filepath):
     """Parse filepath for recos (reported to have been) run on the file.
 
     Parameters
@@ -338,7 +380,7 @@ def recosFromPath(filepath):
     return recos
 
 
-def pathFromRecos(orig_path, recos, ext=EXTENSION):
+def path_from_recos(orig_path, recos, ext=EXTENSION):
     """Construct a new filename given original path/filename and a list of
     reconstructions that have been run on the file.
 
@@ -746,7 +788,8 @@ def parse_args(descr=__doc__):
     num_inspecs = 0
     if args.infile is not None:
         args.infile = abspath(expand(args.infile))
-        assert isfile(args.infile)
+        if not isfile(args.infile):
+            raise IOError('`infile` "%s" is not a file.' % args.infile)
         num_inspecs += 1
 
     if args.indir is not None:
@@ -819,7 +862,7 @@ def main():
     from icecube import dataclasses, dataio, icetray, multinest_icetray # pylint: disable=unused-variable, import-error
     from cluster import get_spline_tables
 
-    lock_info = getProcessInfo()
+    lock_info = get_process_info()
 
     wstdout('='*79 + '\n')
     for d in [vars(args), lock_info]:
@@ -846,7 +889,7 @@ def main():
         # output file cannot be same as input file (which it will have same
         # name, since the name is derived from recos run / etc.)
 
-        already_run = recosFromPath(infile_path)
+        already_run = recos_from_path(infile_path)
         # NOTE: now skipping a reco is determined ONLY by the "If" kwarg, and
         # not by the filename at all (swap the comment on the next line for the
         # line below to change behavior back)
@@ -911,7 +954,9 @@ def main():
         infile_lock_path = infile_path + LOCK_SUFFIX
         outfile_lock_path = None
         allrecos = set(recos_to_run).union(already_run)
-        outfile_name = basename(pathFromRecos(orig_path=infile_path, recos=allrecos))
+        outfile_name = basename(
+            path_from_recos(orig_path=infile_path, recos=allrecos)
+        )
         outfile_path = abspath(expand(join(args.outdir, outfile_name)))
 
         #print('args.outdir: "%s", outfile_name: "%s", outfile_path: "%s"'
@@ -1082,6 +1127,18 @@ def main():
                 remove(outfile_path)
                 raise
             else:
+                # Write a file indicating that the output file is ready for
+                # further processing
+                readyfile_path = outfile_path + '.ready'
+                with open(readyfile_path, 'w'):
+                    pass
+                try:
+                    chown_and_chmod(readyfile_path, gid=GID, mode=MODE)
+                except OSError, err:
+                    # errno 1 : operation not permitted (allowing this)
+                    if err.errno != 1:
+                        raise
+
                 # If the directive was to process all events in the file,
                 # remove the original file as this is completely superseded by
                 # `outfile` (i.e., `outfile` is a superset of `infile_path`).

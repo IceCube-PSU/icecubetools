@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+
+from __future__ import absolute_import, division, print_function
+
+
 """
 Functions for working with geometry.
 """
@@ -203,6 +207,8 @@ def contourPaths(x, y, z, z_thresh):
 
 def main():
     """Test some stuff"""
+    import matplotlib as mpl
+    mpl.use('agg')
     import matplotlib.pyplot as plt
 
     vert = np.array(
@@ -222,7 +228,7 @@ def main():
     )
 
     cntr = polyCentroid(vert)
-    print cntr
+    print(cntr)
 
     fig = plt.figure(200)
     fig.clf()
@@ -230,8 +236,8 @@ def main():
     ax.add_patch(plt.Polygon(vert, closed=True, fill=True,
                              facecolor='w', edgecolor='k'))
     ax.plot(cntr[0], cntr[1], 'ko')
-    plt.draw()
-    plt.show()
+    fig.savefig('/tmp/poly.png', dpi=120)
+    print('Inspect image at /tmp/poly.png')
 
     vert = np.array(
         [[-1, -1],
@@ -241,7 +247,7 @@ def main():
     )
 
     cntr = polyCentroid(vert)
-    print 'square centered at (0, 0): computed centroid =', cntr
+    print('square centered at (0, 0): computed centroid =', cntr)
 
     fig = plt.figure(201)
     fig.clf()
@@ -250,9 +256,9 @@ def main():
         plt.Polygon(vert, closed=True, fill=True, facecolor='w', edgecolor='k')
     )
     ax.plot(cntr[0], cntr[1], 'ko')
-    plt.draw()
-    plt.show()
+    fig.savefig('/tmp/square.png', dpi=120)
+    print('Inspect image at /tmp/square.png')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
